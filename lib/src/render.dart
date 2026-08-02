@@ -12,7 +12,7 @@ String renderStep(PlanStep step) {
       ? null
       : accepted.length == 1
       ? '[ \$? -eq ${accepted.single} ]'
-      : 'code=\$?; ${accepted.map((code) => '[ "\$code" -eq $code ]').join(' || ')}';
+      : '{ code=\$?; ${accepted.map((code) => '[ "\$code" -eq $code ]').join(' || ')}; }';
   if (step.cwd == '.') {
     return status == null ? command : '($command || $status)';
   }

@@ -18,7 +18,7 @@ void main() {
       setUp(() async {
         temp = Directory.systemTemp.createTempSync('monorepo-equivalence-');
         Directory(p.join(temp.path, 'bin')).createSync();
-        for (final pkg in ['a space', "b'quote"]) {
+        for (final pkg in ['a space%20semi;', "b'quote"]) {
           Directory(p.join(temp.path, pkg)).createSync();
         }
         const stub = r'''#!/usr/bin/env python3
@@ -42,8 +42,8 @@ sys.exit(code)
           packages: [
             Package(
               name: 'a',
-              path: p.join(temp.path, 'a space'),
-              relPath: 'a space',
+              path: p.join(temp.path, 'a space%20semi;'),
+              relPath: 'a space%20semi;',
               hasTest: true,
             ),
             Package(
@@ -93,7 +93,7 @@ sys.exit(code)
               'exit $code, filtered $filtered, fail-fast $failFast',
               () async {
                 File(
-                  p.join(temp.path, 'a space', '.exit'),
+                  p.join(temp.path, 'a space%20semi;', '.exit'),
                 ).writeAsStringSync('$code');
                 final args = [
                   if (filtered) '--tags=t',

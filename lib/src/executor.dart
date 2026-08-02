@@ -56,7 +56,7 @@ class Executor {
       final process = await Process.start(
         step.argv.first,
         step.argv.skip(1).toList(),
-        workingDirectory: p.join(root, p.fromUri(step.cwd)),
+        workingDirectory: p.join(root, step.cwd),
         environment: {...environment, ...step.env},
         runInShell: Platform.isWindows,
       );
@@ -66,11 +66,11 @@ class Executor {
       }
 
       final out = process.stdout
-          .transform(utf8.decoder)
+          .transform(const Utf8Decoder(allowMalformed: true))
           .listen(emit)
           .asFuture<void>();
       final err = process.stderr
-          .transform(utf8.decoder)
+          .transform(const Utf8Decoder(allowMalformed: true))
           .listen(emit)
           .asFuture<void>();
       final code = await process.exitCode;
