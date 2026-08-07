@@ -43,22 +43,40 @@ class Executor {
   final void Function(String) write;
   final Map<String, String> environment;
   final StepRunner? runner;
+  final bool windows;
+  final bool Function(String, Map<String, String>) commandAvailable;
   Executor({
     void Function(String)? write,
     this.environment = const {},
     this.runner,
-  }) : write = write ?? stdout.write;
+    bool? windows,
+    bool Function(String, Map<String, String>)? commandAvailable,
+  }) : write = write ?? stdout.write,
+       windows = windows ?? Platform.isWindows,
+       commandAvailable = commandAvailable ?? _executableAvailable;
 
   Future<StepResult> _run(PlanStep step, String root, bool buffered) async {
     final watch = Stopwatch()..start();
     final output = StringBuffer();
+    if (windows &&
+        step.argv.first == 'bash' &&
+        !commandAvailable('bash', {
+          ...Platform.environment,
+          ...environment,
+          ...step.env,
+        })) {
+      final text =
+          'Git Bash is required on Windows. Command: ${step.argv.map(shellQuote).join(' ')}\n';
+      if (!buffered) write(text);
+      return StepResult(step, 2, watch.elapsed, text, environmentError: true);
+    }
     try {
       final process = await Process.start(
         step.argv.first,
         step.argv.skip(1).toList(),
         workingDirectory: p.join(root, step.cwd),
         environment: {...environment, ...step.env},
-        runInShell: Platform.isWindows,
+        runInShell: windows,
       );
       void emit(String text) {
         output.write(text);
@@ -133,4 +151,26 @@ class Executor {
           : 0,
     );
   }
+}
+
+bool _executableAvailable(String name, Map<String, String> environment) {
+  String? value(String name) {
+    for (final entry in environment.entries) {
+      if (entry.key.toUpperCase() == name) return entry.value;
+    }
+    return null;
+  }
+
+  final extensions = Platform.isWindows
+      ? (value('PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';')
+      : [''];
+  for (final directory in (value('PATH') ?? '').split(
+    Platform.isWindows ? ';' : ':',
+  )) {
+    if (directory.isEmpty) continue;
+    for (final extension in ['', ...extensions]) {
+      if (File(p.join(directory, '$name$extension')).existsSync()) return true;
+    }
+  }
+  return false;
 }

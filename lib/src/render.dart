@@ -27,10 +27,10 @@ String renderPlan(Plan plan, {bool lines = false, bool json = false}) {
     ).convert(plan.steps.map((step) => step.toJson()).toList());
   }
   final buffer = StringBuffer();
-  for (final comment in plan.comments) {
+  for (final comment in lines ? <String>[] : plan.comments) {
     buffer.writeln('# ${comment.replaceAll('\n', ' ')}');
   }
-  if (plan.concurrency > 1) {
+  if (!lines && plan.concurrency > 1) {
     buffer.writeln(
       '# Shell replay is sequential; execution uses ${plan.concurrency} workers.',
     );

@@ -25,7 +25,7 @@ void main() {
 import json,os,sys
 code=int(open('.exit').read()) if os.path.exists('.exit') else 0
 with open(os.environ['LOG'],'a') as f:
- f.write(json.dumps({'argv':sys.argv[1:],'cwd':os.getcwd(),'root':os.getenv('MONOREPO_ROOT'),'code':code})+'\n')
+ f.write(json.dumps({'argv':sys.argv[1:],'cwd':os.getcwd(),'root':os.getenv('MONOREPO_ROOT'),'extra':os.getenv('EXTRA_ENV'),'code':code})+'\n')
 sys.exit(code)
 ''';
         for (final name in ['dart', 'flutter', 'stub']) {
@@ -112,7 +112,31 @@ sys.exit(code)
         }
       }
       test(
-        'exec passes empty arguments, shell metacharacters and MONOREPO_ROOT',
+        'multiple accepted statuses preserve successful command behavior',
+        () async {
+          for (final code in [0, 65, 79, 1]) {
+            File(p.join(temp.path, '.exit')).writeAsStringSync('$code');
+            final log = File(env['LOG']!);
+            if (log.existsSync()) log.deleteSync();
+            await compare(
+              Plan(
+                root: temp.path,
+                command: 'exec',
+                steps: [
+                  const PlanStep(
+                    package: 'root',
+                    cwd: '.',
+                    argv: ['stub'],
+                    acceptedExitCodes: [0, 65, 79],
+                  ),
+                ],
+              ),
+            );
+          }
+        },
+      );
+      test(
+        'exec passes empty arguments, shell metacharacters, env assignments and MONOREPO_ROOT',
         () async {
           await compare(
             buildPlan(
@@ -121,6 +145,7 @@ sys.exit(code)
               const Request(
                 'exec',
                 arguments: [
+                  'EXTRA_ENV=1',
                   'stub',
                   '',
                   "a'b",
@@ -242,4 +267,53 @@ sys.exit(code)
     );
     expect(result.exitCode, 2);
   });
+  test(
+    'Windows run reports missing bash as environment error with command',
+    () async {
+      final output = <String>[];
+      final result =
+          await Executor(
+            windows: true,
+            commandAvailable: (name, env) => false,
+            write: output.add,
+          ).execute(
+            const Plan(
+              root: '.',
+              command: 'run',
+              steps: [
+                PlanStep(
+                  package: 's',
+                  cwd: '.',
+                  argv: ['bash', '-c', 'echo hello'],
+                ),
+              ],
+            ),
+          );
+      expect(result.exitCode, 2);
+      expect(output.join(), contains('bash -c'));
+      expect(output.join(), contains('Git Bash is required'));
+    },
+  );
+  test('arbitrary binary subprocess output cannot crash decoding', () async {
+    final output = <String>[];
+    final result = await Executor(write: output.add).execute(
+      Plan(
+        root: Directory.current.path,
+        command: 'exec',
+        steps: [
+          const PlanStep(
+            package: 'binary',
+            cwd: '.',
+            argv: [
+              'python3',
+              '-c',
+              'import sys; sys.stdout.buffer.write(bytes([255]))',
+            ],
+          ),
+        ],
+      ),
+    );
+    expect(result.exitCode, 0);
+    expect(output.join(), contains('\uFFFD'));
+  }, skip: Platform.isWindows);
 }
