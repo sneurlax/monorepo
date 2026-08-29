@@ -88,7 +88,7 @@ Default shell plans collect failures with `rc=0` and `exit $rc`. `--fail-fast` r
 
 Paste plans into a POSIX shell at the workspace root. Built-in paths are relative and portable between checkouts. `exec` and `run` plans include the absolute `MONOREPO_ROOT` of the inspected checkout; regenerate those plans when moving a checkout.
 
-Shell replay is sequential, including when `--concurrency` exceeds 1. A comment in full shell plans calls this out. At concurrency 1, executable steps, cwd, argv, explicit env, accepted statuses, and fail-fast selection match the executor. Parallel execution changes scheduling and can start more work before the first failure is observed. In that case a shell replay preserves the commands and status policy, not parallel timing or fail-fast scheduling. Summaries and buffered output are executor presentation, not part of the shell plan.
+Shell replay is sequential, including when `--concurrency` exceeds 1. A comment in full shell plans calls this out. At concurrency 1, executable steps, cwd, argv, explicit env, accepted statuses, and fail-fast selection match the executor. Parallel execution changes scheduling and can start more work before the first failure is observed. In that case a shell replay preserves the commands and status policy, not parallel timing or fail-fast scheduling. Summaries and buffered output are executor presentation, not part of the shell plan. The specified fail-fast shell form uses `set -e`, which returns a failing child's status; the CLI normalizes step failures to 1 and environment failures to 2. Replay equivalence therefore concerns executed child commands and accepted statuses, not every outer nonzero numeric exit code.
 
 ## Test
 
@@ -105,7 +105,7 @@ Configuration `test.args` comes before CLI arguments following `--`. Arguments a
 
 Exit 79 is accepted as `no matching tests` only when arguments include `--tags`/`-t`, `--exclude-tags`/`-x`, `--name`/`-n`, or `--plain-name`/`-N`. Without a filter it is a failure. Exit 65 and Flutter exit 1 are never interpreted as a missing test directory.
 
-All selected packages run by default, with an aggregate failure at the end. Fail-fast stops starting queued work; processes already running finish. Parallel output is buffered per package and printed when it finishes. A summary lists package, runner, result, and elapsed seconds.
+All selected packages run by default, with an aggregate failure at the end. Fail-fast stops starting queued work; processes already running finish. Parallel output is buffered per package and printed when it finishes. A summary lists package, runner, result, and elapsed seconds. Captured child output is retained for the invocation, so memory use grows with total output; use smaller scopes for particularly noisy commands.
 
 ## Analyze and format
 
@@ -206,6 +206,8 @@ sh -e test-steps.sh
 Use `monorepo plan test > test-all.sh` for a self-contained script that runs every suite and returns an aggregate status. Nothing in pub resolution depends on the tool, so removing its global activation needs no repository change.
 
 ## Develop and verify
+
+[Real-repository acceptance](docs/acceptance.md) records the 13-workspace discovery, plan, drift, runtime, and original-state checks. The [gate record](docs/acceptance.json) identifies the tested implementation revision and expected baseline failures.
 
 ```sh
 export DASH__SUPPRESS_ANALYTICS=true FLUTTER_SUPPRESS_ANALYTICS=true
