@@ -16,12 +16,16 @@ class Finding {
   final int line;
   final String message;
 
+  /// Individual sites summarized by a collapsed finding.
+  final List<Finding>? sites;
+
   const Finding({
     required this.kind,
     this.package,
     required this.file,
     required this.line,
     required this.message,
+    this.sites,
   });
 
   Map<String, Object?> toJson() => {
@@ -30,6 +34,10 @@ class Finding {
     'file': file,
     'line': line,
     'message': message,
+    if (sites != null)
+      'sites': [
+        for (final site in sites!) {'line': site.line, 'message': site.message},
+      ],
   };
 }
 
@@ -72,12 +80,16 @@ class CheckReport {
 }
 
 /// Examines workflow text and filesystem paths without running any shell code.
+///
+/// Unresolved commands and Melos invocations are collapsed to one finding per
+/// job unless [verbose] asks for every site.
 CheckReport checkWorkspace(
   Workspace workspace,
   Config config,
-  Map<String, OwnedFiles> ownership,
-) {
-  return _Checker(workspace, config, ownership).run();
+  Map<String, OwnedFiles> ownership, {
+  bool verbose = false,
+}) {
+  return _Checker(workspace, config, ownership, verbose).run();
 }
 
 class _Checker {
@@ -90,8 +102,12 @@ class _Checker {
   final tested = <String>{};
   final partial = <String, List<Finding>>{};
   final formatted = <String>{};
+  final bool verbose;
 
-  _Checker(this.workspace, this.config, this.ownership);
+  /// Unparsed and Melos sites keyed by kind, file, and job before collapsing.
+  final sites = <(String, String, String), List<Finding>>{};
+
+  _Checker(this.workspace, this.config, this.ownership, this.verbose);
 
   CheckReport run() {
     for (final step in readWorkflowSteps(workspace.root, config.workflows)) {
@@ -100,6 +116,7 @@ class _Checker {
     for (final step in _scriptSteps()) {
       _body(step, coverage: false);
     }
+    _collapse();
     for (final package in workspace.packages) {
       if (config.ignore.contains(package.name)) continue;
       if (!analyzed.contains(package.name) && !_allowed('analyze', package)) {
@@ -170,21 +187,77 @@ class _Checker {
     message: message,
   );
 
-  void _body(WorkflowStep step, {required bool coverage}) {
-    if (step.dynamicContext) {
+  void _site(WorkflowStep step, String kind, int line, String message) {
+    final finding = Finding(
+      kind: kind,
+      file: step.file,
+      line: line,
+      message: message,
+    );
+    final key = (kind, step.file, step.job);
+    final list = sites.putIfAbsent(key, () => []);
+    if (!list.any((f) => f.line == line && f.message == message)) {
+      list.add(finding);
+    }
+  }
+
+  void _collapse() {
+    final keys = sites.keys.toList()
+      ..sort((a, b) {
+        for (final difference in [
+          a.$1.compareTo(b.$1),
+          a.$2.compareTo(b.$2),
+          a.$3.compareTo(b.$3),
+        ]) {
+          if (difference != 0) return difference;
+        }
+        return 0;
+      });
+    for (final key in keys) {
+      final list = sites[key]!
+        ..sort((a, b) {
+          final line = a.line.compareTo(b.line);
+          return line != 0 ? line : a.message.compareTo(b.message);
+        });
+      if (verbose || list.length == 1) {
+        warnings.addAll(list);
+        continue;
+      }
+      final (kind, file, job) = key;
+      final lines = {for (final f in list) f.line}.join(', ');
+      final where = job.isEmpty ? '' : '${_jobLabel(job)}: ';
       warnings.add(
         Finding(
-          kind: 'unparsed',
-          file: step.file,
-          line: step.line,
-          message: 'Dynamic workflow context; no coverage inferred',
+          kind: kind,
+          file: file,
+          line: list.first.line,
+          message: kind == 'melos'
+              ? '$where${list.length} Melos invocations (lines $lines); replace with raw commands. Coverage through Melos is not inferred.'
+              : '$where${list.length} commands could not be resolved statically (lines $lines); no coverage inferred from them. First: ${list.first.message}. Use --verbose to list each.',
+          sites: list,
         ),
+      );
+    }
+  }
+
+  String _jobLabel(String job) =>
+      job.startsWith('script ') || job.startsWith('melos script ')
+      ? job
+      : 'job "$job"';
+
+  void _body(WorkflowStep step, {required bool coverage}) {
+    if (step.dynamicContext) {
+      _site(
+        step,
+        'unparsed',
+        step.line,
+        step.dynamicReason ?? 'Dynamic workflow context; no coverage inferred',
       );
       return;
     }
     if (!_path(
-      step.workingDirectory,
       '.',
+      step.location,
       step,
       step.line,
       kind: 'working-directory',
@@ -194,48 +267,73 @@ class _Checker {
     }
     for (final command in parseShell(
       step.run,
-      cwd: step.workingDirectory,
+      cwd: step.location,
       line: step.line,
+      environment: step.environment,
+      root: step.root,
     )) {
       if (command.warning != null) {
-        warnings.add(
-          Finding(
-            kind: 'unparsed',
-            file: step.file,
-            line: command.line,
-            message: command.warning!,
-          ),
-        );
+        _site(step, 'unparsed', command.line, command.warning!);
         continue;
       }
       final argv = command.argv;
       if (argv.isEmpty) continue;
-      if (argv.first == 'cd') {
+      if (argv.first.contains(r'$')) {
+        _unparsed(
+          step,
+          command,
+          'Dynamic command "${argv.first}"; no coverage inferred',
+        );
+        continue;
+      }
+      if (argv.first == 'cd' || argv.first == 'pushd') {
         final args = argv.skip(1).where((a) => a != '--').toList();
-        if (args.length != 1 || args.first.startsWith('-')) {
-          _unparsed(step, command, 'Unsupported cd arguments');
+        // `cd -` returns to a directory checked when it was entered, and a
+        // bare `pushd` swaps the top two stack entries.
+        if ((argv.first == 'cd' && args.length == 1 && args.first == '-') ||
+            (argv.first == 'pushd' && args.isEmpty)) {
+          continue;
+        }
+        if (args.length != 1 ||
+            args.first.startsWith('-') ||
+            args.first.startsWith('+')) {
+          _unparsed(step, command, 'Unsupported ${argv.first} arguments');
         } else {
           _path(
             args.first,
-            command.cwd,
+            command.location,
             step,
             command.line,
-            kind: 'cd',
+            kind: argv.first,
             directory: true,
           );
         }
         continue;
       }
+      if (argv.first == 'popd') {
+        if (argv.length > 1) {
+          _unparsed(step, command, 'Unsupported popd arguments');
+        }
+        continue;
+      }
+      if (argv.length == 3 && argv[0] == 'env' && argv[1] == '-C') {
+        _path(
+          argv[2],
+          command.location,
+          step,
+          command.line,
+          kind: 'env -C',
+          directory: true,
+        );
+        continue;
+      }
       if (_isMelos(argv)) {
         if (coverage) {
-          warnings.add(
-            Finding(
-              kind: 'melos',
-              file: step.file,
-              line: command.line,
-              message:
-                  'Melos invocation in CI; replace with raw commands. Coverage through Melos is not inferred.',
-            ),
+          _site(
+            step,
+            'melos',
+            command.line,
+            'Melos invocation in CI; replace with raw commands. Coverage through Melos is not inferred.',
           );
         }
         continue;
@@ -246,7 +344,7 @@ class _Checker {
             if (i + 1 < argv.length) {
               _path(
                 argv[++i],
-                command.cwd,
+                command.location,
                 step,
                 command.line,
                 kind: 'cargo manifest',
@@ -257,7 +355,7 @@ class _Checker {
           } else if (argv[i].startsWith('--manifest-path=')) {
             _path(
               argv[i].substring('--manifest-path='.length),
-              command.cwd,
+              command.location,
               step,
               command.line,
               kind: 'cargo manifest',
@@ -277,6 +375,17 @@ class _Checker {
       }
       final runner = argv.first;
       final kind = argv[1];
+      if (isExternal(command.cwd)) {
+        // Outside the checkout, relative paths name no member.
+        continue;
+      }
+      // Usage and version output exits successfully without running anything.
+      if (argv
+          .skip(2)
+          .takeWhile((a) => a != '--')
+          .any((a) => {'--help', '-h', '--version'}.contains(a))) {
+        continue;
+      }
       final paths = _arguments(argv.skip(2).toList(), kind, runner: runner);
       if (paths == null) {
         _unparsed(
@@ -293,12 +402,23 @@ class _Checker {
       var valid = true;
       for (final path in paths) {
         valid =
-            _path(path, command.cwd, step, command.line, kind: kind) && valid;
+            _path(path, command.location, step, command.line, kind: kind) &&
+            valid;
+      }
+      if (valid && coverage && command.uncertain) {
+        _unparsed(
+          step,
+          command,
+          '$runner $kind ${command.uncertainReason}; no coverage inferred',
+        );
+        continue;
       }
       if (!valid || !coverage) continue;
       final targets = paths.isEmpty
           ? [p.posix.normalize(command.cwd)]
-          : paths.map((path) => _resolve(command.cwd, path)).toList();
+          : paths
+                .map((path) => _resolve(command.location, path, step.root))
+                .toList();
       switch (kind) {
         case 'analyze':
           for (final package in workspace.packages) {
@@ -345,30 +465,29 @@ class _Checker {
     }
   }
 
+  /// Checks [value] relative to the absolute [location]. Paths outside the
+  /// checkout are external and never looked up on this machine.
   bool _path(
     String value,
-    String cwd,
+    String location,
     WorkflowStep step,
     int line, {
     required String kind,
     bool directory = false,
   }) {
-    if (_dynamicPath(value) || _dynamicPath(cwd)) {
-      warnings.add(
-        Finding(
-          kind: 'unparsed',
-          file: step.file,
-          line: line,
-          message: 'Dynamic $kind path "$value"; cannot verify it',
-        ),
+    if (_dynamicPath(value) || _dynamicPath(location)) {
+      _site(
+        step,
+        'unparsed',
+        line,
+        'Dynamic $kind path "$value"; cannot verify it',
       );
       return false;
     }
-    final relative = _resolve(cwd, value);
-    final absolute = p.isAbsolute(relative)
-        ? relative
-        : p.join(workspace.root, relative);
-    final type = FileSystemEntity.typeSync(absolute);
+    final relative = _resolve(location, value, step.root);
+    // CI-created locations outside the checkout are not repository drift.
+    if (isExternal(relative)) return true;
+    final type = FileSystemEntity.typeSync(p.join(workspace.root, relative));
     if (type == FileSystemEntityType.notFound ||
         (directory && type != FileSystemEntityType.directory)) {
       errors.add(
@@ -393,16 +512,8 @@ class _Checker {
     return matches.isEmpty ? null : matches.first.name;
   }
 
-  void _unparsed(WorkflowStep step, ShellCommand command, String message) {
-    warnings.add(
-      Finding(
-        kind: 'unparsed',
-        file: step.file,
-        line: command.line,
-        message: message,
-      ),
-    );
-  }
+  void _unparsed(WorkflowStep step, ShellCommand command, String message) =>
+      _site(step, 'unparsed', command.line, message);
 
   Iterable<WorkflowStep> _scriptSteps() sync* {
     final pubspecFile = File(p.join(workspace.root, 'pubspec.yaml'));
@@ -429,6 +540,8 @@ class _Checker {
         line: scriptLine('monorepo', entry.key),
         run: entry.value.run,
         workingDirectory: '.',
+        job: 'script ${entry.key}',
+        environment: const {'MONOREPO_ROOT': workspaceMarker},
       );
     }
     final melos = workspace.pubspec['melos'];
@@ -445,6 +558,10 @@ class _Checker {
             line: scriptLine('melos', entry.key.toString()),
             run: run,
             workingDirectory: '.',
+            // Distinct from a monorepo script of the same name, so their
+            // collapsed findings stay separate.
+            job: 'melos script ${entry.key}',
+            environment: const {'MELOS_ROOT_PATH': workspaceMarker},
           );
         }
       }
@@ -458,11 +575,14 @@ bool _isMelos(List<String> argv) =>
         argv.take(4).join(' ') == 'dart pub global activate' &&
         argv[4] == 'melos');
 
-bool _dynamicPath(String value) => RegExp(r'[$*?\[\]~]').hasMatch(value);
+/// Globs and expansions make a path dynamic. The shell expands `~` only at
+/// the start of a word, so `RUNNER~1` in a Windows short name stays literal.
+bool _dynamicPath(String value) => RegExp(r'[$*?\[\]]|^~').hasMatch(value);
 
-String _resolve(String cwd, String target) => p.posix.normalize(
-  p.posix.join(cwd.replaceAll('\\', '/'), target.replaceAll('\\', '/')),
-);
+/// Root-relative path of [target] from the absolute [location], or an
+/// [externalMarker] path when it lies outside the checkout at [root].
+String _resolve(String location, String target, String root) =>
+    rebasePath(joinLocation(location, target), root: root);
 
 bool _under(String path, String parent) {
   final normalizedPath = p.posix.normalize(path);
@@ -530,9 +650,6 @@ List<String>? _arguments(
     '--pub',
     '--set-exit-if-changed',
     '--fix',
-    '--help',
-    '-h',
-    '--version',
     '--verbose',
     '-v',
     '--chain-stack-traces',

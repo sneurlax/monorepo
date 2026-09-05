@@ -94,7 +94,13 @@ class CheckCommand extends Command<int> {
   CheckCommand() {
     argParser
       ..addFlag('json', negatable: false)
-      ..addFlag('strict', negatable: false);
+      ..addFlag('strict', negatable: false)
+      ..addFlag(
+        'verbose',
+        abbr: 'v',
+        negatable: false,
+        help: 'List every unresolved site instead of one summary per job.',
+      );
   }
   @override
   Future<int> run() async {
@@ -106,6 +112,7 @@ class CheckCommand extends Command<int> {
       workspace,
       config,
       collectOwnership(workspace, config),
+      verbose: argResults!['verbose'] as bool,
     );
     stdout.writeln(
       argResults!['json'] as bool

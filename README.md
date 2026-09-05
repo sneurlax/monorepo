@@ -170,11 +170,22 @@ The names are illustrative; replace them with members of your workspace. Unknown
 monorepo check
 monorepo check --json
 monorepo check --strict
+monorepo check --verbose
 ```
 
 Check reads YAML workflow files and configured script bodies. It does not execute any workflow or script. Like other commands, it first uses the metadata-only pub workspace discovery command.
 
-It understands workflow, job, and step working-directory defaults; checkout path prefixes; multiline/folded YAML; literal one-level shell loops; `cd` and subshells; `&&`, `||`, semicolons; `timeout`, `env`, assignment, and `xvfb-run` wrappers; and static `sh -c`/`bash -c` bodies. Coverage is inferred only for recognized Dart/Flutter analyze, format, and test commands.
+It understands workflow, job, and step working-directory defaults; checkout path prefixes; multiline/folded YAML; `cd` and subshells; `&&`, `||`, semicolons; `timeout`, `env`, assignment, and `xvfb-run` wrappers; and static `sh -c`/`bash -c` bodies. Coverage is inferred only for recognized Dart/Flutter analyze, format, and test commands. Commands are recognized by basename, so `"$SDK/bin/flutter" test` counts as `flutter test`.
+
+Workflow context is resolved the way the runner resolves it, before the shell starts:
+
+- A static `strategy.matrix` expands into one copy of each step per combination, following GitHub's order: the cartesian product, then `exclude`, then `include`. `${{ matrix.x }}` and nested `${{ matrix.x.y }}` resolve to each concrete value. A matrix computed by an expression (`fromJSON(...)`) stays unresolved.
+- `${{ env.X }}` and shell `$X`/`${X}` resolve from workflow, job, and step `env:` literals, with step values winning. A value that is itself an unresolved expression hides outer definitions instead of falling back to them. Shell variables are expanded only outside single quotes, only when the script never assigns the name, and only when the value contains no shell metacharacters. A step that appends a name to `$GITHUB_ENV` or `${{ github.env }}` makes it unknown for later steps, including several appends on one line. An append that cannot be attributed to names, such as `tee`, a grouped redirection, or a variable holding the file's path, makes every workflow variable unknown. Actions (`uses:` steps) are assumed not to overwrite variables the workflow declares.
+- `${{ github.workspace }}` and `$GITHUB_WORKSPACE` are the CI workspace. Runner variables such as `GITHUB_WORKSPACE` and `HOME` exist only in the shell; `${{ env.GITHUB_WORKSPACE }}` and `${{ env.HOME }}` resolve only when the workflow declares them. With `actions/checkout` `path: P` (also written as a full URL such as `https://gitea.com/actions/checkout@v4`), the repository is `P` inside it: steps start in the workspace, so `cd P/packages/a` reaches a member and `cd P/packages/missing` is a stale path. Directories outside `P` are outside the checkout. `${{ runner.temp }}`, `$RUNNER_TEMP`, `$HOME`, absolute paths such as `/opt/hostedtoolcache`, and relative paths that leave the workspace are outside the checkout too. Commands there cannot cover a member, and their paths are never looked up, so results do not depend on the machine running the check.
+- `for x in a b c; do ...; done` with literal words expands once per word, including nested loops. A loop over globs, variables, or command substitutions, and `while`/`until` bodies, may run zero times. Their commands still get stale-path checks, but a test, analyze, or format command inside them is a warning and never coverage. Loops whose bodies contain no such commands produce no finding. Bash array literals such as `args+=(--target "$t")` are not subshells.
+- Shell functions (`name() { ...; }` and `function name { ...; }`) run where they are called. A brace body's `cd` persists after the call and a parenthesized body's does not. A function nothing calls is checked for stale paths, and its test, analyze, or format commands warn. `pushd`, `popd`, `cd -`, and `env -C dir` move the directory; pipeline members and background commands do not change it for later commands.
+- A `cd` that may not run leaves the directory unknown afterwards: inside `if`, `case`, or a loop that may run zero times, after `||`, or after a command other than `cd` joined by `&&`. Commands after `break`, `continue`, `return`, or an `exit` that can succeed may be skipped, so they warn and never count; `exit 1` and `|| exit` fail the step visibly and do not.
+- Names a script assigns, unsets, or reads into through any builtin (`printf -v`, `declare`, `typeset`, `local`, `unset`, `let`, `read`, `mapfile`, `readarray`, `${NAME:=x}`, arithmetic) are never substituted, and a nameref (`declare -n`) turns substitution off for the script. `--help`, `-h`, and `--version` runs never count as coverage.
 
 | Finding | Severity |
 | --- | --- |
@@ -183,8 +194,10 @@ It understands workflow, job, and step working-directory defaults; checkout path
 | Member is not analyzed | Warning |
 | Owned Dart files are not formatted | Warning with count and first five paths |
 | Only specific test files run | Partial-test warning and uncovered-suite error |
-| Dynamic paths, matrix context, or unsupported relevant syntax | Unparsed warning |
+| Dynamic paths, unresolved expressions, or unsupported relevant syntax | Unparsed warning |
 | Melos invocation in CI | Warning |
+
+Unparsed and Melos findings collapse to one warning per job (or per configured script), with the count, the line numbers, and the first reason. `--verbose` (`-v`) lists every site instead. In JSON, a collapsed finding carries a `sites` array with each site's `line` and `message`.
 
 Analyze over a directory covers member roots below it. Format covers owned files beneath each named path. Test over a member or its `test/` directory covers that member; an individual file gives partial coverage. `integration_test/` is outside the v0 coverage model. A full test invocation elsewhere, a config ignore, or a reasoned allow entry resolves the test gap. With no workflows, every member is uncovered.
 
