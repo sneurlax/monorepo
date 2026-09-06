@@ -3,6 +3,7 @@ import 'package:args/command_runner.dart';
 import 'src/commands/runner.dart';
 import 'src/model.dart';
 
+export 'src/changes.dart';
 export 'src/config.dart';
 export 'src/executor.dart';
 export 'src/filters.dart';

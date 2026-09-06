@@ -13,6 +13,9 @@ class Request {
   final bool check;
   final String? script;
   final bool windows;
+
+  /// Notes about how the selection was made, printed as plan comments.
+  final List<String> comments;
   const Request(
     this.command, {
     this.filters = const Filters(),
@@ -22,6 +25,7 @@ class Request {
     this.check = false,
     this.script,
     this.windows = false,
+    this.comments = const [],
   });
 }
 
@@ -113,6 +117,7 @@ Plan buildPlan(
   final comments = [
     for (final cycle in workspace.cycles)
       'dependency cycle: ${cycle.join(', ')} (ordered by name)',
+    ...request.comments,
   ];
   final selected = <Package>[];
   for (final package in workspace.packages) {

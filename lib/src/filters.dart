@@ -36,12 +36,20 @@ class Filters {
   // Presence is resolved before planning, so selection performs no I/O.
   final Set<String>? directoryPackages;
   final Set<String>? filePackages;
+
+  /// Members selected by `--since`, resolved from git before planning.
+  final Set<String>? changedPackages;
+
+  /// The `--since` ref, for skip reasons.
+  final String? since;
   const Filters({
     this.scope = const [],
     this.ignore = const [],
     this.flutter,
     this.directoryPackages,
     this.filePackages,
+    this.changedPackages,
+    this.since,
   });
 
   String? skipReason(Package package, Config config, String command) {
@@ -73,6 +81,9 @@ class Filters {
     }
     if (filePackages != null && !filePackages!.contains(package.name)) {
       return 'file filter';
+    }
+    if (changedPackages != null && !changedPackages!.contains(package.name)) {
+      return 'unchanged since $since';
     }
     return null;
   }

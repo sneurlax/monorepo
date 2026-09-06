@@ -33,9 +33,9 @@ monorepo test --no-flutter
 monorepo exec --file-exists ffigen.yaml -- dart run ffigen --config ffigen.yaml
 ```
 
-The workspace root is not a member. The list shows name, relative path, Dart/Flutter kind, test and integration-test directories, and config ignores. A direct Flutter SDK dependency, or a Flutter test SDK dev dependency, marks a member as Flutter. Member dependencies and dev dependencies determine dependency-first order; ties use package name. Cycles are collapsed, their members ordered by name, and plans print a comment.
+The workspace root is not a member. Filters narrow the list, but config ignores are shown in the last column instead of hiding members. The list shows name, relative path, Dart/Flutter kind, test and integration-test directories, and config ignores. A direct Flutter SDK dependency, or a Flutter test SDK dev dependency, marks a member as Flutter. Member dependencies and dev dependencies determine dependency-first order; ties use package name. Cycles are collapsed, their members ordered by name, and plans print a comment.
 
-`test`, `analyze`, `format`, and `exec` share these filters:
+`list`, `graph`, `test`, `analyze`, `format`, `exec`, and the matching `plan` subcommands share these filters:
 
 | Filter | Meaning |
 | --- | --- |
@@ -44,6 +44,16 @@ The workspace root is not a member. The list shows name, relative path, Dart/Flu
 | `--flutter`, `--no-flutter` | Select Flutter or Dart members |
 | `--dir-exists relative/path` | Require this directory inside the member |
 | `--file-exists relative/path` | Require this file inside the member |
+| `--since git-ref` | Select members that own a file changed since the ref |
+| `--include-dependents` | With `--since`, also select members that depend on a changed member |
+
+`--since main` selects members owning a file listed by `git diff --name-only main...HEAD`, plus uncommitted (staged or unstaged) and untracked files that git does not ignore. Ownership uses the same fences as formatting: a file belongs to the deepest member directory containing it, so a nested example's change selects the example and not its parent. A file under a directory that has its own pubspec but is not a member, such as `cargokit/build_tool`, selects nobody. Files outside every member, such as the README or workflows, select nobody. A change to the root `pubspec.yaml`, `pubspec.lock`, or `analysis_options.yaml` selects every member, because it can change every member's resolution or lints; plans print a comment saying so. `--include-dependents` adds members that depend on a changed member through dependencies or dev dependencies, transitively. Unselected members appear in plans as `unchanged since <ref>`. Git is only asked to read: `rev-parse`, `diff`, and `ls-files` run with `GIT_OPTIONAL_LOCKS=0` so they do not refresh the index.
+
+```sh
+monorepo test --since origin/main --include-dependents
+monorepo plan analyze --since HEAD~1 --lines
+monorepo list --since main
+```
 
 Patterns containing `/` match workspace-relative paths. Others match pubspec names. Globs support `*`, `?`, and `**`; `*` does not cross `/`. Quote globs to keep the shell from expanding them. An exact package name in `--scope` overrides a config ignore, including `test.ignore`. A wildcard or path scope does not. CLI `--ignore` still wins. Filters that match nothing produce no executable steps.
 

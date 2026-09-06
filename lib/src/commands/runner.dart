@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:args/args.dart';
 import 'package:args/command_runner.dart';
 import 'package:path/path.dart' as p;
+import '../changes.dart';
 import '../check/coverage.dart';
 import '../config.dart';
 import '../executor.dart';
@@ -42,6 +44,86 @@ Future<(Workspace, Config)> loadWorkspace() async {
   );
 }
 
+/// Adds the member selection options shared by list, graph, and operations.
+void addFilterOptions(ArgParser parser) {
+  parser
+    ..addMultiOption('scope', splitCommas: false, valueHelp: 'name|glob')
+    ..addMultiOption('ignore', splitCommas: false, valueHelp: 'name|glob')
+    ..addFlag(
+      'flutter',
+      defaultsTo: false,
+      help: 'Select Flutter packages, or --no-flutter for Dart.',
+    )
+    ..addOption('dir-exists', valueHelp: 'relative/path')
+    ..addOption('file-exists', valueHelp: 'relative/path')
+    ..addOption(
+      'since',
+      valueHelp: 'git-ref',
+      help:
+          'Select members owning files changed in <ref>...HEAD or uncommitted.',
+    )
+    ..addFlag(
+      'include-dependents',
+      negatable: false,
+      help: 'With --since, also select members that depend on changed ones.',
+    );
+}
+
+/// Resolves filter options against the workspace. Presence checks and git
+/// run here, so planning itself performs no I/O.
+Future<(Filters, List<String>)> parseFilters(
+  ArgResults options,
+  Workspace workspace,
+) async {
+  Set<String>? presence(String option, bool directory) {
+    final value = options[option] as String?;
+    if (value == null) return null;
+    if (value.isEmpty ||
+        p.isAbsolute(value) ||
+        p.split(p.normalize(value)).contains('..')) {
+      throw ToolException('--$option must be a relative path within a member');
+    }
+    return workspace.packages
+        .where(
+          (package) => directory
+              ? Directory(p.join(package.path, value)).existsSync()
+              : File(p.join(package.path, value)).existsSync(),
+        )
+        .map((p) => p.name)
+        .toSet();
+  }
+
+  final since = options['since'] as String?;
+  final dependents = options['include-dependents'] as bool;
+  if (dependents && since == null) {
+    throw UsageException(
+      '--include-dependents requires --since',
+      'Usage: --since <git-ref> --include-dependents',
+    );
+  }
+  ChangeSet? changes;
+  if (since != null) {
+    changes = changeSet(
+      workspace,
+      since,
+      await changedFiles(workspace.root, since),
+      includeDependents: dependents,
+    );
+  }
+  return (
+    Filters(
+      scope: options['scope'] as List<String>,
+      ignore: options['ignore'] as List<String>,
+      flutter: options.wasParsed('flutter') ? options['flutter'] as bool : null,
+      directoryPackages: presence('dir-exists', true),
+      filePackages: presence('file-exists', false),
+      changedPackages: changes?.packages,
+      since: since,
+    ),
+    changes?.comments ?? const <String>[],
+  );
+}
+
 class ListCommand extends Command<int> {
   @override
   String get name => 'list';
@@ -50,6 +132,7 @@ class ListCommand extends Command<int> {
       'List pub workspace members, package kind, and test directories.';
   ListCommand() {
     argParser.addFlag('json', negatable: false);
+    addFilterOptions(argParser);
   }
   @override
   Future<int> run() async {
@@ -57,7 +140,15 @@ class ListCommand extends Command<int> {
       usageException('list takes no positional arguments');
     }
     final (workspace, config) = await loadWorkspace();
-    final entries = workspace.packages
+    final (filters, _) = await parseFilters(argResults!, workspace);
+    // Config ignores are shown in a column rather than hiding members.
+    final packages = workspace.packages
+        .where(
+          (package) =>
+              filters.skipReason(package, const Config(), 'list') == null,
+        )
+        .toList();
+    final entries = packages
         .map(
           (package) => {
             ...package.toJson(),
@@ -70,7 +161,7 @@ class ListCommand extends Command<int> {
       stdout.writeln(const JsonEncoder.withIndent('  ').convert(entries));
     } else {
       stdout.writeln('package\tpath\tkind\ttest\tintegration_test\tignored');
-      for (final package in workspace.packages) {
+      for (final package in packages) {
         final ignored = config.ignore.contains(package.name)
             ? 'all'
             : config.testIgnore.contains(package.name)
@@ -153,18 +244,7 @@ class OperationCommand extends Command<int> {
     _ => 'Run a configured script, or list available scripts.',
   };
   OperationCommand(this.name, {this.plan = false}) {
-    if (name != 'run') {
-      argParser
-        ..addMultiOption('scope', splitCommas: false, valueHelp: 'name|glob')
-        ..addMultiOption('ignore', splitCommas: false, valueHelp: 'name|glob')
-        ..addFlag(
-          'flutter',
-          defaultsTo: false,
-          help: 'Select Flutter packages, or --no-flutter for Dart.',
-        )
-        ..addOption('dir-exists', valueHelp: 'relative/path')
-        ..addOption('file-exists', valueHelp: 'relative/path');
-    }
+    if (name != 'run') addFilterOptions(argParser);
     if (name == 'test' || name == 'exec') {
       argParser
         ..addOption(
@@ -201,31 +281,6 @@ class OperationCommand extends Command<int> {
       }
       return 0;
     }
-    final scope = name == 'run' ? <String>[] : options['scope'] as List<String>;
-    final ignore = name == 'run'
-        ? <String>[]
-        : options['ignore'] as List<String>;
-    Set<String>? presence(String option, bool directory) {
-      if (name == 'run') return null;
-      final value = options[option] as String?;
-      if (value == null) return null;
-      if (value.isEmpty ||
-          p.isAbsolute(value) ||
-          p.split(p.normalize(value)).contains('..')) {
-        throw ToolException(
-          '--$option must be a relative path within a member',
-        );
-      }
-      return workspace.packages
-          .where(
-            (package) => directory
-                ? Directory(p.join(package.path, value)).existsSync()
-                : File(p.join(package.path, value)).existsSync(),
-          )
-          .map((p) => p.name)
-          .toSet();
-    }
-
     var concurrency = 1;
     if (name == 'test' || name == 'exec') {
       concurrency = int.tryParse(options['concurrency'] as String) ?? 0;
@@ -245,17 +300,13 @@ class OperationCommand extends Command<int> {
         );
       }
     }
+    final (filters, notes) = name == 'run'
+        ? (const Filters(), const <String>[])
+        : await parseFilters(options, workspace);
     final request = Request(
       name,
-      filters: Filters(
-        scope: scope,
-        ignore: ignore,
-        flutter: name != 'run' && options.wasParsed('flutter')
-            ? options['flutter'] as bool
-            : null,
-        directoryPackages: presence('dir-exists', true),
-        filePackages: presence('file-exists', false),
-      ),
+      filters: filters,
+      comments: notes,
       arguments: name == 'run' ? options.rest.skip(1).toList() : options.rest,
       concurrency: concurrency,
       failFast:
