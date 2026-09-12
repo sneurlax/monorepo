@@ -249,8 +249,11 @@ class OperationCommand extends Command<int> {
       argParser
         ..addOption(
           'concurrency',
+          abbr: 'j',
           defaultsTo: '1',
-          help: 'Number of package processes, not test file concurrency.',
+          help:
+              'Number of package processes, not test file concurrency. '
+              'exec waits for the members a step depends on.',
         )
         ..addFlag(
           'fail-fast',
@@ -259,6 +262,16 @@ class OperationCommand extends Command<int> {
         );
     }
     if (name == 'format') argParser.addFlag('check', negatable: false);
+    if (!plan) {
+      argParser.addOption(
+        'reporter',
+        allowed: ['text', 'json'],
+        defaultsTo: 'text',
+        help:
+            'text streams output and ends with a summary table; json prints '
+            'one document with each step\'s status, duration and output.',
+      );
+    }
     if (plan) {
       argParser
         ..addFlag('json', negatable: false)
@@ -334,6 +347,9 @@ class OperationCommand extends Command<int> {
       stdout.writeln(renderPlan(built, json: json, lines: lines));
       return 0;
     }
-    return (await Executor().execute(built)).exitCode;
+    return (await Executor(
+      reporter: options['reporter'] == 'json' ? Reporter.json : Reporter.text,
+      handleSignals: true,
+    ).execute(built)).exitCode;
   }
 }

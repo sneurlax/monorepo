@@ -38,6 +38,10 @@ class PlanStep {
   final Map<String, String> env;
   final List<int> acceptedExitCodes;
   final String? skipReason;
+
+  /// Packages of earlier steps that must finish before this one starts when
+  /// execution is parallel. Sequential order already satisfies them.
+  final List<String> dependsOn;
   const PlanStep({
     required this.package,
     required this.cwd,
@@ -45,6 +49,7 @@ class PlanStep {
     this.env = const {},
     this.acceptedExitCodes = const [0],
     this.skipReason,
+    this.dependsOn = const [],
   });
   Map<String, Object?> toJson() => {
     'package': package,
@@ -53,6 +58,7 @@ class PlanStep {
     'env': env,
     'acceptedExitCodes': acceptedExitCodes,
     'skipReason': skipReason,
+    if (dependsOn.isNotEmpty) 'dependsOn': dependsOn,
   };
 }
 
@@ -71,6 +77,35 @@ class Plan {
     this.concurrency = 1,
     this.failFast = false,
   });
+}
+
+/// The nearest selected members [package] depends on, looking through
+/// unselected members, limited to those earlier in workspace order so a
+/// cycle can never block execution.
+List<String> _selectedDependencies(
+  Workspace workspace,
+  Package package,
+  List<Package> selected,
+) {
+  final order = {
+    for (var i = 0; i < workspace.packages.length; i++)
+      workspace.packages[i].name: i,
+  };
+  final byName = {for (final pkg in workspace.packages) pkg.name: pkg};
+  final names = selected.map((pkg) => pkg.name).toSet();
+  final result = <String>{};
+  final seen = <String>{package.name};
+  final pending = [...package.localDeps];
+  while (pending.isNotEmpty) {
+    final name = pending.removeLast();
+    if (!seen.add(name) || !byName.containsKey(name)) continue;
+    if (names.contains(name)) {
+      if (order[name]! < order[package.name]!) result.add(name);
+    } else {
+      pending.addAll(byName[name]!.localDeps);
+    }
+  }
+  return result.toList()..sort((a, b) => order[a]!.compareTo(order[b]!));
 }
 
 bool hasTestFilter(List<String> arguments) {
@@ -286,6 +321,7 @@ Plan buildPlan(
             cwd: package.relPath,
             argv: argv,
             env: {'MONOREPO_ROOT': workspace.root, ...extraEnv},
+            dependsOn: _selectedDependencies(workspace, package, selected),
           ),
         );
       }

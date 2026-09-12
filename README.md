@@ -104,18 +104,43 @@ Shell replay is sequential, including when `--concurrency` exceeds 1. A comment 
 
 ```sh
 monorepo test
-monorepo test --concurrency 3
+monorepo test -j 3
+monorepo test --reporter json > results.json
 monorepo test --fail-fast -- --name='serialization'
 monorepo test -- --exclude-tags=round_trip -j 1
 ```
 
 Each selected member with `test/` runs `dart test` or `flutter test` in its package directory. Missing test directories are skipped before invocation with `no test/ directory`. Integration tests are never selected by default; use an explicit script with device arguments for them.
 
-Configuration `test.args` comes before CLI arguments following `--`. Arguments after that separator are passed unchanged to the test runner. `--concurrency` controls simultaneous package processes, defaulting to 1. `-j` after `--` controls test-file concurrency inside each runner. They are independent.
+Configuration `test.args` comes before CLI arguments following `--`. Arguments after that separator are passed unchanged to the test runner. `--concurrency N` (`-j N` before `--`) controls simultaneous package processes, defaulting to 1. `-j` after `--` controls test-file concurrency inside each runner. They are independent: `monorepo test -j 3 -- -j 1` runs three packages at a time, each with one test file at a time.
 
 Exit 79 is accepted as `no matching tests` only when arguments include `--tags`/`-t`, `--exclude-tags`/`-x`, `--name`/`-n`, or `--plain-name`/`-N`. Without a filter it is a failure. Exit 65 and Flutter exit 1 are never interpreted as a missing test directory.
 
-All selected packages run by default, with an aggregate failure at the end. Fail-fast stops starting queued work; processes already running finish. Parallel output is buffered per package and printed when it finishes. A summary lists package, runner, result, and elapsed seconds. Captured child output is retained for the invocation, so memory use grows with total output; use smaller scopes for particularly noisy commands.
+All selected packages run by default, with an aggregate failure at the end. Fail-fast stops starting queued work; processes already running finish. Each step's output starts with a `[package] command` header. At concurrency 1 output streams as it is produced; above 1 it is buffered per step and printed whole when the step finishes, so packages never interleave. Captured child output is retained for the invocation, so memory use grows with total output; use smaller scopes for particularly noisy commands.
+
+Test steps start in plan order as soon as a worker is free. Each test runner compiles its dependencies from source, so a package's tests never need another package's tests to finish first. Exec steps also wait for the steps of the members they depend on (through dependencies or dev dependencies, looking through unselected members), because exec commands such as `build_runner` or `ffigen` often produce code a dependent consumes. A failed dependency does not cancel its dependents unless `--fail-fast` is set. The plan records this as `dependsOn` in `plan exec --json`; the shell plan is sequential and dependency-ordered already, so it needs no extra syntax. Concurrency never changes the plan itself.
+
+Every executing command ends with a summary table of package, command, status, and duration, followed by totals. From `monorepo exec -j 2 --ignore tract_flutter_example -- dart --version` in tract:
+
+```text
+[tract] dart --version
+Dart SDK version: 3.13.2 (stable) (Tue Aug 25 01:01:12 2026 -0700) on "linux_x64"
+[tract_flutter] dart --version
+Dart SDK version: 3.13.2 (stable) (Tue Aug 25 01:01:12 2026 -0700) on "linux_x64"
+package                command         status                         duration
+tract                  dart --version  passed                         0.03s
+tract_flutter          dart --version  passed                         0.03s
+tract_flutter_example  -               skip: ignored by command line  -
+2 passed, 0 failed, 1 skipped in 0.06s
+```
+
+Test steps that accept exit 79 report `no matching tests`, counted with the passes in the totals line.
+
+`--reporter json` replaces the streamed output and the table with one JSON document on stdout: `command`, `exitCode`, `seconds`, a `summary` of counts by status (`passed`, `no-tests`, `failed`, `skipped`), and `steps`. Each step has the plan fields plus `status`, `exitCode`, `seconds`, and the captured `output`. Exit statuses are the same as with the text reporter. `test`, `analyze`, `format`, `exec`, and `run` all accept `--reporter`.
+
+Steps get no input: each child's stdin is closed as soon as it starts, at every concurrency, so a command that reads stdin sees end of file instead of waiting. A command that needs input should be run directly, or through the shell replay from `monorepo plan <cmd> --lines`, where stdin is the terminal.
+
+On SIGINT or SIGTERM, the tool signals each running step's whole process tree, skips queued steps as `interrupted`, prints their buffered output and the summary (or the JSON document), and exits 130 for SIGINT or 143 for SIGTERM. Children that ignore the signal are killed after ten seconds, or at once on a second signal.
 
 ## Analyze and format
 
@@ -141,7 +166,7 @@ monorepo run native:test
 monorepo run custom -- 'argument with spaces'
 ```
 
-Exec runs the command vector in each selected package directory, with the same concurrency/fail-fast options as test. Run executes a configured shell body at the workspace root via `sh -c` on POSIX or `bash -c` on Windows. Extra arguments are shell-quoted and appended to the body. Scripts should be written to accept arguments at the end. Both commands export `MONOREPO_ROOT`.
+Exec runs the command vector in each selected package directory, with the same concurrency/fail-fast options as test and the dependency ordering described above. Run executes a configured shell body at the workspace root via `sh -c` on POSIX or `bash -c` on Windows. Extra arguments are shell-quoted and appended to the body. Scripts should be written to accept arguments at the end. Both commands export `MONOREPO_ROOT`.
 
 `monorepo run` without a name lists scripts and descriptions. Scripts can be copied and run directly; avoid making one script depend on `monorepo` itself. The tool does not sandbox arbitrary commands or undo their side effects.
 
@@ -215,7 +240,7 @@ Check also validates paths in `monorepo.scripts` and transitional `melos.scripts
 
 JSON has `errors` and `warnings` arrays with `kind`, `package`, `file`, `line`, and `message`. Strict mode treats warnings as a failing exit status while retaining their warning classification in JSON. It does not modify CI or write allow entries.
 
-Exit statuses are 0 for success, 1 for failed steps or check findings, and 2 for usage, configuration, or environment errors. Default check warnings alone do not fail; strict warnings do.
+Exit statuses are 0 for success, 1 for failed steps or check findings, 2 for usage, configuration, or environment errors, and 130 or 143 when a run is interrupted by SIGINT or SIGTERM. Default check warnings alone do not fail; strict warnings do.
 
 ## Drop the tool
 

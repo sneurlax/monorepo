@@ -218,7 +218,13 @@ dev_dependencies:
     }
     final result = await tool(['run', 'print', '--', 'hello world']);
     expect(result.exitCode, 0, reason: '${result.stderr}');
-    expect(result.stdout, startsWith('hello world\n'));
+    final lines = (result.stdout as String).split('\n');
+    // Windows runs scripts through Git Bash; the header shows the real argv.
+    expect(
+      lines[0],
+      startsWith(Platform.isWindows ? '[print] bash -c' : '[print] sh -c'),
+    );
+    expect(lines[1], 'hello world');
   });
   test('discovery timeout terminates its child', () async {
     await expectLater(
