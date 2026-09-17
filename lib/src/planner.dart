@@ -69,6 +69,10 @@ class Plan {
   final List<String> comments;
   final int concurrency;
   final bool failFast;
+
+  /// Why nothing runs when `--since` selects no member. Shell plans print it
+  /// as a comment, `--lines` included, and execution prints it alone.
+  final String? notice;
   const Plan({
     required this.root,
     required this.command,
@@ -76,6 +80,7 @@ class Plan {
     this.comments = const [],
     this.concurrency = 1,
     this.failFast = false,
+    this.notice,
   });
 }
 
@@ -168,6 +173,15 @@ Plan buildPlan(
     } else {
       selected.add(package);
     }
+  }
+  final since = request.filters.since;
+  final String? notice;
+  if (since == null || selected.isNotEmpty) {
+    notice = null;
+  } else if (request.filters.changedPackages?.isEmpty ?? true) {
+    notice = 'no members changed since $since';
+  } else {
+    notice = 'none of the members changed since $since are selected';
   }
   switch (request.command) {
     case 'test':
@@ -372,5 +386,6 @@ Plan buildPlan(
     comments: comments,
     concurrency: request.concurrency,
     failFast: request.failFast,
+    notice: notice,
   );
 }

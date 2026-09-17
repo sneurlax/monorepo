@@ -30,6 +30,7 @@ String renderPlan(Plan plan, {bool lines = false, bool json = false}) {
   for (final comment in lines ? <String>[] : plan.comments) {
     buffer.writeln('# ${comment.replaceAll('\n', ' ')}');
   }
+  if (plan.notice != null) buffer.writeln('# ${plan.notice}');
   if (!lines && plan.concurrency > 1) {
     buffer.writeln(
       '# Shell replay is sequential; execution uses ${plan.concurrency} workers.',

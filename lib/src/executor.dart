@@ -331,6 +331,22 @@ class Executor {
     final steps = plan.steps;
     final results = List<StepResult?>.filled(steps.length, null);
     final buffered = plan.concurrency > 1 || reporter == Reporter.json;
+    if (plan.notice != null &&
+        reporter == Reporter.text &&
+        steps.every((step) => step.skipReason != null)) {
+      // An empty --since selection is a normal outcome, not a run to report.
+      write('${plan.notice}\n');
+      return ExecutionResult([
+        for (final step in steps)
+          StepResult(
+            step,
+            null,
+            Duration.zero,
+            '',
+            skipReason: step.skipReason,
+          ),
+      ], 0);
+    }
     final unfinished = <String, int>{};
     for (final step in steps) {
       if (step.skipReason == null) {

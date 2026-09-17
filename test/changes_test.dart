@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:monorepo/monorepo.dart';
@@ -93,6 +94,94 @@ void main() {
         'tool': 'unchanged since main',
       },
     );
+  });
+
+  group('empty selection', () {
+    Plan plan(String command, Filters filters) => buildPlan(
+      workspace,
+      const Config(),
+      Request(command, filters: filters, arguments: const ['true']),
+    );
+    const none = Filters(changedPackages: {}, since: 'main');
+
+    test('plans say nothing changed, --lines included', () {
+      for (final command in ['test', 'analyze', 'format', 'exec']) {
+        final built = plan(command, none);
+        expect(built.notice, 'no members changed since main', reason: command);
+        expect(
+          renderPlan(built, lines: true),
+          '# no members changed since main',
+        );
+        expect(
+          renderPlan(built),
+          allOf(
+            contains('# no members changed since main\nrc=0\n'),
+            endsWith('exit \$rc'),
+          ),
+        );
+      }
+      expect(
+        plan(
+          'test',
+          const Filters(
+            scope: ['tool'],
+            changedPackages: {'core'},
+            since: 'main',
+          ),
+        ).notice,
+        'none of the members changed since main are selected',
+      );
+      expect(
+        plan(
+          'test',
+          const Filters(changedPackages: {'core'}, since: 'main'),
+        ).notice,
+        isNull,
+      );
+      expect(plan('test', const Filters(scope: ['nothing'])).notice, isNull);
+    });
+
+    test(
+      'empty --lines and full plans are valid scripts that exit 0',
+      () async {
+        final built = plan('test', none);
+        for (final script in [
+          renderPlan(built, lines: true),
+          renderPlan(built),
+          renderPlan(
+            buildPlan(
+              workspace,
+              const Config(),
+              const Request('test', filters: none, failFast: true),
+            ),
+          ),
+        ]) {
+          final syntax = await Process.run('sh', ['-n', '-c', script]);
+          expect(syntax.exitCode, 0, reason: '$script\n${syntax.stderr}');
+          final run = await Process.run('sh', ['-c', script]);
+          expect(run.exitCode, 0, reason: script);
+          expect(run.stdout, isEmpty);
+        }
+      },
+      testOn: '!windows',
+    );
+
+    test('execution prints the notice alone and exits 0', () async {
+      final output = StringBuffer();
+      final result = await Executor(
+        write: output.write,
+        runner: (step, root, buffered) => fail('nothing should run'),
+      ).execute(plan('test', none));
+      expect(result.exitCode, 0);
+      expect(output.toString(), 'no members changed since main\n');
+      final json = StringBuffer();
+      final document = await Executor(
+        write: json.write,
+        reporter: Reporter.json,
+      ).execute(plan('test', none));
+      expect(document.exitCode, 0);
+      expect(jsonDecode(json.toString())['summary']['skipped'], 5);
+    });
   });
 
   group('git', () {
