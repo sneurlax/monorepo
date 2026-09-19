@@ -8,6 +8,7 @@ import '../check/coverage.dart';
 import '../config.dart';
 import '../executor.dart';
 import '../filters.dart';
+import '../graph.dart';
 import '../ownership.dart';
 import '../planner.dart';
 import '../render.dart';
@@ -24,6 +25,7 @@ class MonorepoRunner extends CommandRunner<int> {
       help: 'Print the installed version.',
     );
     addCommand(ListCommand());
+    addCommand(GraphCommand());
     addCommand(CheckCommand());
     for (final name in ['test', 'analyze', 'format', 'exec', 'run']) {
       addCommand(OperationCommand(name));
@@ -172,6 +174,46 @@ class ListCommand extends Command<int> {
         );
       }
     }
+    return 0;
+  }
+}
+
+class GraphCommand extends Command<int> {
+  @override
+  String get name => 'graph';
+  @override
+  String get description =>
+      'Print the dependency graph between workspace members.';
+  GraphCommand() {
+    argParser.addOption(
+      'format',
+      allowed: ['text', 'dot', 'mermaid', 'json'],
+      defaultsTo: 'text',
+      help: 'Edges point from a member to the members it depends on.',
+    );
+    addFilterOptions(argParser);
+  }
+  @override
+  Future<int> run() async {
+    if (argResults!.rest.isNotEmpty) {
+      usageException('graph takes no positional arguments');
+    }
+    final (workspace, _) = await loadWorkspace();
+    final (filters, _) = await parseFilters(argResults!, workspace);
+    final selected = workspace.packages
+        .where(
+          (package) =>
+              filters.skipReason(package, const Config(), 'graph') == null,
+        )
+        .map((package) => package.name)
+        .toSet();
+    stdout.writeln(
+      renderGraph(
+        dependencyGraph(workspace, selected),
+        workspace.cycles,
+        argResults!['format'] as String,
+      ),
+    );
     return 0;
   }
 }

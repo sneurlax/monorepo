@@ -57,6 +57,17 @@ monorepo list --since main
 
 Patterns containing `/` match workspace-relative paths. Others match pubspec names. Globs support `*`, `?`, and `**`; `*` does not cross `/`. Quote globs to keep the shell from expanding them. An exact package name in `--scope` overrides a config ignore, including `test.ignore`. A wildcard or path scope does not. CLI `--ignore` still wins. Filters that match nothing produce no executable steps.
 
+## Show the dependency graph
+
+```sh
+monorepo graph
+monorepo graph --format dot | dot -Tsvg > workspace.svg
+monorepo graph --format mermaid
+monorepo graph --format json --scope 'keepass*'
+```
+
+`graph` prints members in dependency order with edges from each member to the members it depends on. Text output marks dev-dependency edges with `(dev)`; DOT draws them dashed and Flutter members rounded; Mermaid labels them `dev` and draws Flutter members with round ends. A member listed in both `dependencies` and `dev_dependencies` is a regular dependency. JSON has `packages` (name, path, kind, `dependencies`, `devDependencies`) and `cycles`. Filters, including `--since`, select the nodes; edges to unselected members are left out.
+
 ## Inspect plans before running
 
 Every operation builds a plan containing package, working directory, argument vector, environment, accepted exit codes, and any skip reason. Execution consumes that same plan.

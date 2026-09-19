@@ -7,6 +7,7 @@ export 'src/changes.dart';
 export 'src/config.dart';
 export 'src/executor.dart';
 export 'src/filters.dart';
+export 'src/graph.dart';
 export 'src/model.dart';
 export 'src/ownership.dart';
 export 'src/planner.dart';
