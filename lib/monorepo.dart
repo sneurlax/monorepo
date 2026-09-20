@@ -5,6 +5,7 @@ import 'src/model.dart';
 
 export 'src/changes.dart';
 export 'src/config.dart';
+export 'src/doctor.dart';
 export 'src/executor.dart';
 export 'src/filters.dart';
 export 'src/graph.dart';

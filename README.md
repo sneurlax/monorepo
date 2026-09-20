@@ -253,6 +253,34 @@ JSON has `errors` and `warnings` arrays with `kind`, `package`, `file`, `line`, 
 
 Exit statuses are 0 for success, 1 for failed steps or check findings, 2 for usage, configuration, or environment errors, and 130 or 143 when a run is interrupted by SIGINT or SIGTERM. Default check warnings alone do not fail; strict warnings do.
 
+## Check workspace health
+
+```sh
+monorepo doctor
+monorepo doctor --json
+monorepo doctor --strict
+```
+
+Doctor reads the root and member pubspecs and the tree around them. It runs only `dart --version`, `flutter --version --machine`, and the metadata-only `dart pub workspace list --json`; it never runs `pub get` or writes a file. It works from anywhere inside the workspace and still reports when discovery itself fails, which makes it the first thing to run when other commands exit 2.
+
+| Check | Severity |
+| --- | --- |
+| Workspace entry missing, matching no directory, or without a pubspec | Error |
+| Member without `resolution: workspace`, or duplicate member names | Error |
+| `dart pub workspace list` fails | Error |
+| A member's SDK or Flutter constraint excludes the toolchain on PATH | Error |
+| `dart` missing, or `flutter` missing while Flutter members exist | Error |
+| Invalid `monorepo:` configuration | Error |
+| Nested pubspec with `resolution: workspace` that the root does not list | Warning |
+| No root `pubspec.lock` or root `.dart_tool/package_config.json` | Warning |
+| Stray member `pubspec.lock` or `.dart_tool/package_config.json` | Warning |
+| Members with different Dart SDK or Flutter constraints | Warning |
+| The same external dependency constrained differently across members | Warning |
+| Nested non-member packages, such as `cargokit/build_tool` | Info |
+| `dart` and `flutter` versions and paths | Info |
+
+Workspace entries may use `*`, `?` and `[...]` within a path segment. The nested-package search skips hidden directories, `build/`, `node_modules/`, and directories marked with `CACHEDIR.TAG` (Cargo `target/`). Errors exit 1. Warnings do not, unless `--strict`. JSON has `root` and `errors`, `warnings`, and `info` arrays of `severity`, `kind`, and `message`.
+
 ## Drop the tool
 
 Copy the commands, then stop using it:

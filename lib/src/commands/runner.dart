@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import '../changes.dart';
 import '../check/coverage.dart';
 import '../config.dart';
+import '../doctor.dart';
 import '../executor.dart';
 import '../filters.dart';
 import '../graph.dart';
@@ -26,6 +27,7 @@ class MonorepoRunner extends CommandRunner<int> {
     );
     addCommand(ListCommand());
     addCommand(GraphCommand());
+    addCommand(DoctorCommand());
     addCommand(CheckCommand());
     for (final name in ['test', 'analyze', 'format', 'exec', 'run']) {
       addCommand(OperationCommand(name));
@@ -215,6 +217,36 @@ class GraphCommand extends Command<int> {
       ),
     );
     return 0;
+  }
+}
+
+class DoctorCommand extends Command<int> {
+  @override
+  String get name => 'doctor';
+  @override
+  String get description =>
+      'Report workspace health and toolchains without changing anything.';
+  DoctorCommand() {
+    argParser
+      ..addFlag('json', negatable: false)
+      ..addFlag(
+        'strict',
+        negatable: false,
+        help: 'Exit 1 on warnings as well as errors.',
+      );
+  }
+  @override
+  Future<int> run() async {
+    if (argResults!.rest.isNotEmpty) {
+      usageException('doctor takes no positional arguments');
+    }
+    final report = await diagnose(Directory.current.path);
+    stdout.writeln(
+      argResults!['json'] as bool
+          ? const JsonEncoder.withIndent('  ').convert(report.toJson())
+          : report.renderHuman(),
+    );
+    return report.hasProblems(strict: argResults!['strict'] as bool) ? 1 : 0;
   }
 }
 
