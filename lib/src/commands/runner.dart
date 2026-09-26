@@ -5,6 +5,7 @@ import 'package:args/command_runner.dart';
 import 'package:path/path.dart' as p;
 import '../changes.dart';
 import '../check/coverage.dart';
+import '../completion.dart';
 import '../config.dart';
 import '../doctor.dart';
 import '../executor.dart';
@@ -28,6 +29,7 @@ class MonorepoRunner extends CommandRunner<int> {
     addCommand(ListCommand());
     addCommand(GraphCommand());
     addCommand(DoctorCommand());
+    addCommand(CompletionCommand());
     addCommand(CheckCommand());
     for (final name in ['test', 'analyze', 'format', 'exec', 'run']) {
       addCommand(OperationCommand(name));
@@ -216,6 +218,24 @@ class GraphCommand extends Command<int> {
         argResults!['format'] as String,
       ),
     );
+    return 0;
+  }
+}
+
+class CompletionCommand extends Command<int> {
+  @override
+  String get name => 'completion';
+  @override
+  String get description => 'Print a completion script for bash, zsh, or fish.';
+  @override
+  String get invocation => 'monorepo completion <bash|zsh|fish>';
+  @override
+  Future<int> run() async {
+    final rest = argResults!.rest;
+    if (rest.length != 1 || !{'bash', 'zsh', 'fish'}.contains(rest.single)) {
+      usageException('completion takes one shell: bash, zsh, or fish');
+    }
+    stdout.writeln(completionScript(rest.single, runner!));
     return 0;
   }
 }

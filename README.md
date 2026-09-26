@@ -281,6 +281,16 @@ Doctor reads the root and member pubspecs and the tree around them. It runs only
 
 Workspace entries may use `*`, `?` and `[...]` within a path segment. The nested-package search skips hidden directories, `build/`, `node_modules/`, and directories marked with `CACHEDIR.TAG` (Cargo `target/`). Errors exit 1. Warnings do not, unless `--strict`. JSON has `root` and `errors`, `warnings`, and `info` arrays of `severity`, `kind`, and `message`.
 
+## Shell completion
+
+```sh
+source <(monorepo completion bash)                    # ~/.bashrc
+source <(monorepo completion zsh)                     # ~/.zshrc, after compinit
+monorepo completion fish > ~/.config/fish/completions/monorepo.fish
+```
+
+The scripts are generated from the command definitions, so they cover every command, subcommand, and option, including `plan` subcommands and option values with fixed choices. `--since` completes local branches, tags, and remote branches through `git for-each-ref`; `--scope` and `--ignore` complete member names through `monorepo list`; `run` completes configured script names through `monorepo run`. Those lookups run only when you complete those values. Nothing is completed after `--`, where bash falls back to file names. For zsh you can also save the output as `_monorepo` in a directory on your `fpath`.
+
 ## Drop the tool
 
 Copy the commands, then stop using it:
