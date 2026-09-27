@@ -1050,6 +1050,31 @@ ${body.split('\n').map((line) => '          $line').join('\n')}
       ]);
     });
 
+    test('script cwd and env feed stale-path checks per step', () {
+      final result = report(
+        const Config(
+          scripts: {
+            'gone': Script.full(run: 'cargo test', cwd: 'packages/missing'),
+            'steps': Script.full(
+              run: '',
+              steps: ['cd ok', r'dart test "$PKG"'],
+              cwd: 'packages/a',
+              env: {'PKG': 'nowhere'},
+            ),
+          },
+        ),
+      );
+      final stale = result.errors
+          .where((f) => f.kind == 'stale-path')
+          .map((f) => f.message)
+          .toList();
+      expect(stale, [
+        'working-directory path does not exist as a directory: packages/missing',
+        'cd path does not exist as a directory: packages/a/ok',
+        'test path does not exist: packages/a/nowhere',
+      ]);
+    });
+
     test('Melos is reported without claiming indirect coverage', () {
       workflow(
         'dart run melos run test\ntimeout 10m dart pub global run melos run analyze\ndart pub global activate melos',

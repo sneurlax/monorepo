@@ -275,6 +275,49 @@ exit \$rc''');
       throwsA(isA<ToolException>()),
     );
   });
+  test('script steps, cwd and env become ordered plan steps', () {
+    final workspace = Workspace(root: '/workspace', packages: const []);
+    final config = Config(
+      scripts: {
+        'web': const Script.full(
+          run: 'dart test -p chrome\nflutter test',
+          steps: ['dart test -p chrome', 'flutter test "\$@"'],
+          cwd: 'packages/a',
+          env: {'LIB': r'${MONOREPO_ROOT}/lib', 'KEEP': r'$MONOREPO_ROOTS'},
+        ),
+        'one': const Script.full(run: 'cargo test', cwd: 'rust'),
+      },
+    );
+    final plan = buildPlan(
+      workspace,
+      config,
+      const Request('run', script: 'web', arguments: ['-x', 'slow']),
+    );
+    expect(plan.steps.map((s) => s.package), ['web step 1', 'web step 2']);
+    expect(plan.steps.map((s) => s.argv), [
+      ['sh', '-c', 'dart test -p chrome', 'sh', '-x', 'slow'],
+      ['sh', '-c', 'flutter test "\$@"', 'sh', '-x', 'slow'],
+    ]);
+    expect(plan.steps.first.cwd, 'packages/a');
+    expect(plan.steps.first.env, {
+      'MONOREPO_ROOT': '/workspace',
+      'LIB': '/workspace/lib',
+      'KEEP': r'$MONOREPO_ROOTS',
+    });
+    final failFast = buildPlan(
+      workspace,
+      config,
+      const Request('run', script: 'web', failFast: true),
+    );
+    expect(renderPlan(failFast), startsWith('set -e\n(cd packages/a && env'));
+    final one = buildPlan(
+      workspace,
+      config,
+      const Request('run', script: 'one', arguments: ['--release']),
+    );
+    expect(one.steps.single.cwd, 'rust');
+    expect(one.steps.single.argv, ['sh', '-c', 'cargo test --release']);
+  });
   test('filters recognize short and long test selectors only', () {
     for (final arg in [
       '--tags=x',

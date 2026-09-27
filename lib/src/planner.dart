@@ -345,8 +345,41 @@ Plan buildPlan(
         throw ToolException('Unknown script: ${request.script}');
       }
       steps.clear();
-      final body = script.run.trimRight();
       final shell = request.windows ? 'bash' : 'sh';
+      final env = {
+        'MONOREPO_ROOT': workspace.root,
+        for (final entry in script.env.entries)
+          entry.key: entry.value
+              .replaceAll(r'${MONOREPO_ROOT}', workspace.root)
+              .replaceAll(
+                RegExp(r'\$MONOREPO_ROOT(?![A-Za-z0-9_])'),
+                workspace.root,
+              ),
+      };
+      final cwd = p.posix.normalize(script.cwd);
+      if (script.steps.isNotEmpty) {
+        // Every step receives extra arguments as its positional parameters.
+        for (var i = 0; i < script.steps.length; i++) {
+          steps.add(
+            PlanStep(
+              package: '${request.script} step ${i + 1}',
+              cwd: cwd,
+              argv: [
+                shell,
+                '-c',
+                script.steps[i].trimRight(),
+                if (request.arguments.isNotEmpty) ...[
+                  shell,
+                  ...request.arguments,
+                ],
+              ],
+              env: env,
+            ),
+          );
+        }
+        break;
+      }
+      final body = script.run.trimRight();
       final List<String> argv;
       if (request.arguments.isEmpty) {
         argv = [shell, '-c', body];
@@ -361,12 +394,7 @@ Plan buildPlan(
         argv = [shell, '-c', '$body$suffix'];
       }
       steps.add(
-        PlanStep(
-          package: request.script!,
-          cwd: '.',
-          argv: argv,
-          env: {'MONOREPO_ROOT': workspace.root},
-        ),
+        PlanStep(package: request.script!, cwd: cwd, argv: argv, env: env),
       );
     default:
       throw ToolException('Unknown plan command: ${request.command}');

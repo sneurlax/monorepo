@@ -5,6 +5,7 @@ import 'package:monorepo/src/filters.dart';
 import 'package:monorepo/src/workspace.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+import 'package:yaml/yaml.dart' as yaml;
 
 void main() {
   late Directory temp;
@@ -131,6 +132,11 @@ void main() {
       'scripts': {
         'short': 'echo ok',
         'long': {'run': 'echo long', 'description': 'A script'},
+        'steps': {
+          'steps': ['echo one', 'echo two'],
+          'cwd': 'packages/core',
+          'env': {'LD_LIBRARY_PATH': r'$MONOREPO_ROOT/lib', 'N': 1},
+        },
       },
       'check': {
         'workflows': ['ci'],
@@ -141,8 +147,43 @@ void main() {
     }, packages);
     expect(config.testArgs, ['--tags=x', '-j', '1']);
     expect(config.scripts['long']!.description, 'A script');
+    final steps = config.scripts['steps']!;
+    expect(steps.bodies, ['echo one', 'echo two']);
+    expect(steps.cwd, 'packages/core');
+    expect(steps.env, {'LD_LIBRARY_PATH': r'$MONOREPO_ROOT/lib', 'N': '1'});
+    expect(config.scripts['short']!.bodies, ['echo ok']);
     expect(config.allow.single.reason, 'External runner');
     expect(config.workflows, ['ci']);
+  });
+  test('script env values keep the text written in pubspec.yaml', () {
+    final root = yaml.loadYaml('''
+scripts:
+  envs:
+    run: echo
+    env:
+      SDK_VERSION: 3.10
+      MODE: 0755
+      HEX: 0x1F
+      FLAG: yes
+      ON: true
+      EXP: 1e3
+      QUOTED: "3.10"
+      SINGLE: '0755'
+      FOLDED: >-
+        3.10
+''');
+    final config = Config.parse(root, const []);
+    expect(config.scripts['envs']!.env, {
+      'SDK_VERSION': '3.10',
+      'MODE': '0755',
+      'HEX': '0x1F',
+      'FLAG': 'yes',
+      'ON': 'true',
+      'EXP': '1e3',
+      'QUOTED': '3.10',
+      'SINGLE': '0755',
+      'FOLDED': '3.10',
+    });
   });
   for (final entry in <String, Object?>{
     'root string': 'bad',
@@ -193,6 +234,67 @@ void main() {
     'script desc type': {
       'scripts': {
         'x': {'run': 'x', 'description': 4},
+      },
+    },
+    'script run and steps': {
+      'scripts': {
+        'x': {
+          'run': 'x',
+          'steps': ['y'],
+        },
+      },
+    },
+    'script empty steps': {
+      'scripts': {
+        'x': {'steps': <String>[]},
+      },
+    },
+    'script blank step': {
+      'scripts': {
+        'x': {
+          'steps': ['a', ' '],
+        },
+      },
+    },
+    'script escaping cwd': {
+      'scripts': {
+        'x': {'run': 'x', 'cwd': '../other'},
+      },
+    },
+    'script absolute cwd': {
+      'scripts': {
+        'x': {'run': 'x', 'cwd': '/tmp'},
+      },
+    },
+    'script env name': {
+      'scripts': {
+        'x': {
+          'run': 'x',
+          'env': {'BAD-NAME': '1'},
+        },
+      },
+    },
+    'script env root': {
+      'scripts': {
+        'x': {
+          'run': 'x',
+          'env': {'MONOREPO_ROOT': '/elsewhere'},
+        },
+      },
+    },
+    'script env list': {
+      'scripts': {
+        'x': {
+          'run': 'x',
+          'env': {
+            'A': ['1'],
+          },
+        },
+      },
+    },
+    'script null cwd': {
+      'scripts': {
+        'x': {'run': 'x', 'cwd': null},
       },
     },
     'check unknown': {

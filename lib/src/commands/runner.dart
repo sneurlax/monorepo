@@ -339,6 +339,13 @@ class OperationCommand extends Command<int> {
   };
   OperationCommand(this.name, {this.plan = false}) {
     if (name != 'run') addFilterOptions(argParser);
+    if (name == 'run') {
+      argParser.addFlag(
+        'fail-fast',
+        negatable: false,
+        help: 'For a script with steps, stop after the first failing step.',
+      );
+    }
     if (name == 'test' || name == 'exec') {
       argParser
         ..addOption(
@@ -379,9 +386,18 @@ class OperationCommand extends Command<int> {
     if (name == 'run' && options.rest.isEmpty) {
       if (plan) usageException('plan run requires a script name');
       for (final entry in config.scripts.entries) {
-        stdout.writeln(
-          '${entry.key}\t${entry.value.description}\n  ${entry.value.run}',
-        );
+        final script = entry.value;
+        stdout.writeln('${entry.key}\t${script.description}');
+        if (script.cwd != '.') stdout.writeln('  cwd: ${script.cwd}');
+        for (final env in script.env.entries) {
+          stdout.writeln('  env: ${env.key}=${env.value}');
+        }
+        for (var i = 0; i < script.bodies.length; i++) {
+          final prefix = script.steps.isEmpty ? '  ' : '  ${i + 1}. ';
+          stdout.writeln(
+            '$prefix${script.bodies[i].trimRight().replaceAll('\n', '\n${' ' * prefix.length}')}',
+          );
+        }
       }
       if (config.scripts.isEmpty) {
         stdout.writeln('No monorepo.scripts configured.');
@@ -417,7 +433,8 @@ class OperationCommand extends Command<int> {
       arguments: name == 'run' ? options.rest.skip(1).toList() : options.rest,
       concurrency: concurrency,
       failFast:
-          (name == 'test' || name == 'exec') && options['fail-fast'] as bool,
+          (name == 'test' || name == 'exec' || name == 'run') &&
+          options['fail-fast'] as bool,
       check: name == 'format' && options['check'] as bool,
       script: name == 'run' ? options.rest.first : null,
       windows: Platform.isWindows,

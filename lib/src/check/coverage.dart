@@ -520,13 +520,18 @@ class _Checker {
     final YamlNode? node = pubspecFile.existsSync()
         ? loadYamlNode(pubspecFile.readAsStringSync())
         : null;
-    int scriptLine(String section, String name) {
+    int scriptLine(String section, String name, [int? step]) {
       if (node is! YamlMap) return 1;
       final parent = node[section];
       final scripts = parent is YamlMap ? parent['scripts'] : null;
       if (scripts is! YamlMap) return 1;
       final value = scripts.nodes[name];
-      final run = value is YamlMap ? value.nodes['run'] : value;
+      final steps = value is YamlMap ? value.nodes['steps'] : null;
+      final run = step != null && steps is YamlList && step < steps.length
+          ? steps.nodes[step]
+          : value is YamlMap
+          ? value.nodes['run']
+          : value;
       if (run == null) return 1;
       final block =
           run.span.text.trimLeft().startsWith('|') ||
@@ -535,15 +540,33 @@ class _Checker {
     }
 
     for (final entry in config.scripts.entries) {
-      yield WorkflowStep(
-        file: 'pubspec.yaml',
-        line: scriptLine('monorepo', entry.key),
-        run: entry.value.run,
-        workingDirectory: '.',
-        job: 'script ${entry.key}',
-        environment: const {'MONOREPO_ROOT': workspaceMarker},
-      );
+      final script = entry.value;
+      final env = {
+        'MONOREPO_ROOT': workspaceMarker,
+        for (final e in script.env.entries)
+          e.key: e.value
+              .replaceAll(r'${MONOREPO_ROOT}', workspaceMarker)
+              .replaceAll(
+                RegExp(r'\$MONOREPO_ROOT(?![A-Za-z0-9_])'),
+                workspaceMarker,
+              ),
+      };
+      for (var i = 0; i < script.bodies.length; i++) {
+        yield WorkflowStep(
+          file: 'pubspec.yaml',
+          line: scriptLine(
+            'monorepo',
+            entry.key,
+            script.steps.isEmpty ? null : i,
+          ),
+          run: script.bodies[i],
+          workingDirectory: script.cwd,
+          job: 'script ${entry.key}',
+          environment: env,
+        );
+      }
     }
+
     final melos = workspace.pubspec['melos'];
     final scripts = melos is Map ? melos['scripts'] : null;
     if (scripts is Map) {

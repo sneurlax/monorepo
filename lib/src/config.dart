@@ -1,9 +1,34 @@
+import 'package:yaml/yaml.dart';
+
 import 'model.dart';
 
 class Script {
+  /// The shell body, or the steps joined by newlines for listing.
   final String run;
   final String description;
-  const Script(this.run, [this.description = '']);
+
+  /// Ordered shell bodies run as separate steps; empty for a single body.
+  final List<String> steps;
+
+  /// Root-relative directory the script runs in.
+  final String cwd;
+
+  /// Extra environment; `$MONOREPO_ROOT` in values becomes the root path.
+  final Map<String, String> env;
+  const Script(this.run, [this.description = ''])
+    : steps = const [],
+      cwd = '.',
+      env = const {};
+  const Script.full({
+    required this.run,
+    this.description = '',
+    this.steps = const [],
+    this.cwd = '.',
+    this.env = const {},
+  });
+
+  /// The bodies that run, in order.
+  List<String> get bodies => steps.isEmpty ? [run] : steps;
 }
 
 class Allow {
@@ -93,18 +118,70 @@ class Config {
       if (value is String && value.trim().isNotEmpty) {
         scripts[entry.key as String] = Script(value);
       } else {
-        final script = _map(value, 'script ${entry.key}', {
+        final name = entry.key as String;
+        final script = _map(value, 'script $name', {
           'run',
+          'steps',
           'description',
+          'cwd',
+          'env',
         });
+        _rejectNulls(script, 'script $name');
         final run = script['run'];
+        final rawSteps = script['steps'];
         final description = script['description'] ?? '';
-        if (run is! String || run.trim().isEmpty || description is! String) {
+        if ((run == null) == (rawSteps == null) ||
+            (run != null && (run is! String || run.trim().isEmpty)) ||
+            description is! String) {
           throw ToolException(
-            'Script ${entry.key} requires a run string and optional description string',
+            'Script $name requires either a run string or a steps list, and an optional description string',
           );
         }
-        scripts[entry.key as String] = Script(run, description);
+        final steps = rawSteps == null
+            ? const <String>[]
+            : rawSteps is List &&
+                  rawSteps.isNotEmpty &&
+                  rawSteps.every((s) => s is String && s.trim().isNotEmpty)
+            ? rawSteps.cast<String>().toList()
+            : throw ToolException(
+                'Script $name steps must be a non-empty list of non-empty strings',
+              );
+        final rawCwd = script['cwd'] ?? '.';
+        if (rawCwd is! String ||
+            rawCwd.isEmpty ||
+            rawCwd.startsWith('/') ||
+            RegExp(r'^[A-Za-z]:').hasMatch(rawCwd) ||
+            rawCwd.replaceAll('\\', '/').split('/').contains('..')) {
+          throw ToolException(
+            'Script $name cwd must be a relative path inside the workspace',
+          );
+        }
+        final rawEnv = script['env'] ?? <String, Object?>{};
+        if (rawEnv is! Map ||
+            rawEnv.entries.any(
+              (e) =>
+                  e.key is! String ||
+                  !RegExp(
+                    r'^[A-Za-z_][A-Za-z0-9_]*$',
+                  ).hasMatch(e.key as String) ||
+                  e.key == 'MONOREPO_ROOT' ||
+                  e.value is Map ||
+                  e.value is List,
+            )) {
+          throw ToolException(
+            'Script $name env must map variable names other than MONOREPO_ROOT to scalar values',
+          );
+        }
+        scripts[name] = Script.full(
+          run: run as String? ?? steps.join('\n'),
+          description: description,
+          steps: steps,
+          cwd: rawCwd.replaceAll('\\', '/'),
+          env: {
+            for (final e in rawEnv.entries)
+              e.key as String: _scalarText(rawEnv, e.key, e.value),
+          },
+        );
       }
     }
     final allowed = <Allow>[];
@@ -152,6 +229,18 @@ class Config {
       allow: allowed,
     );
   }
+}
+
+/// The text a variable gets, as written: YAML would read a plain `3.10` as
+/// the number 3.1 and `0755` as 755, so plain scalars keep their source text.
+/// Quoted and block scalars are strings already.
+String _scalarText(Map<Object?, Object?> map, Object? key, Object? value) {
+  if (value is String) return value;
+  final node = map is YamlMap ? map.nodes[key] : null;
+  if (node is YamlScalar && node.style == ScalarStyle.PLAIN) {
+    return node.span.text;
+  }
+  return value.toString();
 }
 
 void _rejectNulls(Map<Object?, Object?> map, String at) {

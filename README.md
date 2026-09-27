@@ -175,11 +175,14 @@ monorepo exec --flutter -- flutter clean
 monorepo run
 monorepo run native:test
 monorepo run custom -- 'argument with spaces'
+monorepo run --fail-fast test:web
 ```
 
 Exec runs the command vector in each selected package directory, with the same concurrency/fail-fast options as test and the dependency ordering described above. Run executes a configured shell body at the workspace root via `sh -c` on POSIX or `bash -c` on Windows. Extra arguments are shell-quoted and appended to the body. Scripts should be written to accept arguments at the end. Both commands export `MONOREPO_ROOT`.
 
-`monorepo run` without a name lists scripts and descriptions. Scripts can be copied and run directly; avoid making one script depend on `monorepo` itself. The tool does not sandbox arbitrary commands or undo their side effects.
+A script is either a string body or a mapping with `run` or `steps` (exactly one), and optional `description`, `cwd`, and `env`. `cwd` is a workspace-relative directory the body runs in, checked by `check` like a workflow `working-directory`. `env` adds literal variables, each exactly as written (a plain `3.10` stays `3.10` and `0755` stays `0755`); `$MONOREPO_ROOT` or `${MONOREPO_ROOT}` in a value becomes the workspace root, and `MONOREPO_ROOT` itself cannot be overridden. `steps` run in order as separate plan steps named `<script> step N`, each in its own shell, so a `cd` in one step does not carry into the next. Like `test`, every step runs and the script fails at the end if any failed; `monorepo run --fail-fast <script>` stops after the first failing step. Extra arguments reach each step as its positional parameters (`"$@"`) and are never appended to a step body.
+
+`monorepo run` without a name lists scripts and descriptions, with their `cwd`, `env`, and numbered steps. Scripts can be copied and run directly; avoid making one script depend on `monorepo` itself. The tool does not sandbox arbitrary commands or undo their side effects.
 
 ## Optional configuration
 
@@ -200,6 +203,17 @@ monorepo:
     native:build:
       run: cargo build --manifest-path packages/bluetooth_flutter/rust/Cargo.toml
       description: Build the native shared library.
+    test:oracle:
+      description: Run the round_trip tests against a local oracle.
+      cwd: packages/anytype
+      env:
+        LD_LIBRARY_PATH: $MONOREPO_ROOT/rust/target/release
+      run: dart test --tags=round_trip -j 1
+    test:web:
+      description: Run the chrome suites.
+      steps:
+        - cd packages/manytype_protocol && dart test -p chrome -j 1
+        - cd packages/anytype && dart run tool/fetch_web_test_assets.dart && dart test -p chrome -j 1
   check:
     workflows: [.gitea/workflows, .github/workflows]
     allow:
