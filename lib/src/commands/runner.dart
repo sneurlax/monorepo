@@ -278,7 +278,15 @@ class CheckCommand extends Command<int> {
       'Inspect workflow coverage and stale paths without running their commands.';
   CheckCommand() {
     argParser
-      ..addFlag('json', negatable: false)
+      ..addOption(
+        'reporter',
+        allowed: ['text', 'json', 'github'],
+        defaultsTo: 'text',
+        help:
+            'github prints ::error and ::warning workflow commands, which '
+            'Gitea Actions also reads, before the text report.',
+      )
+      ..addFlag('json', negatable: false, help: 'Same as --reporter json.')
       ..addFlag('strict', negatable: false)
       ..addFlag(
         'verbose',
@@ -292,6 +300,13 @@ class CheckCommand extends Command<int> {
     if (argResults!.rest.isNotEmpty) {
       usageException('check takes no positional arguments');
     }
+    var reporter = argResults!['reporter'] as String;
+    if (argResults!['json'] as bool) {
+      if (argResults!.wasParsed('reporter') && reporter != 'json') {
+        usageException('--json conflicts with --reporter $reporter');
+      }
+      reporter = 'json';
+    }
     final (workspace, config) = await loadWorkspace();
     final report = checkWorkspace(
       workspace,
@@ -299,8 +314,13 @@ class CheckCommand extends Command<int> {
       collectOwnership(workspace, config),
       verbose: argResults!['verbose'] as bool,
     );
+    if (reporter == 'github') {
+      stdout.write(
+        report.renderGithub(prefix: repositoryPrefix(workspace.root)),
+      );
+    }
     stdout.writeln(
-      argResults!['json'] as bool
+      reporter == 'json'
           ? const JsonEncoder.withIndent('  ').convert(report.toJson())
           : report.renderHuman(),
     );

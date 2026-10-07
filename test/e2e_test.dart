@@ -156,6 +156,27 @@ dev_dependencies:
     },
   );
   test(
+    'check --reporter github annotates findings and keeps the report',
+    () async {
+      final result = await tool(['check', '--reporter', 'github']);
+      expect(result.exitCode, 1, reason: '${result.stderr}');
+      final lines = (result.stdout as String).trimRight().split('\n');
+      expect(
+        lines,
+        contains(
+          '::error file=pubspec.yaml,line=1,title=monorepo check test::dart_pkg: No workflow fully tests dart_pkg/test',
+        ),
+      );
+      expect(lines.first, startsWith('::'));
+      expect(
+        lines.last,
+        matches(RegExp(r'^\d+ error\(s\), \d+ warning\(s\)\.$')),
+      );
+      final conflict = await tool(['check', '--json', '--reporter', 'github']);
+      expect(conflict.exitCode, 2);
+    },
+  );
+  test(
     'real Dart and Flutter runner empty/filter exit codes are not conflated',
     () async {
       expect(

@@ -229,6 +229,7 @@ The names are illustrative; replace them with members of your workspace. Unknown
 ```sh
 monorepo check
 monorepo check --json
+monorepo check --reporter github
 monorepo check --strict
 monorepo check --verbose
 ```
@@ -263,7 +264,9 @@ Analyze over a directory covers member roots below it. Format covers owned files
 
 Check also validates paths in `monorepo.scripts` and transitional `melos.scripts` bodies, but these scripts do not establish CI coverage. It does not emulate Melos or follow arbitrary helper scripts. Melos-only workflows remain unproven and show warnings/gaps until raw commands are visible. It does not prove a workflow is enabled, its conditions hold, commands succeed, a device exists, or runtime libraries are installed. Dynamic expressions and unsupported relevant syntax are warnings, never evidence of coverage. Review reported paths generated during CI separately.
 
-JSON has `errors` and `warnings` arrays with `kind`, `package`, `file`, `line`, and `message`. Strict mode treats warnings as a failing exit status while retaining their warning classification in JSON. It does not modify CI or write allow entries.
+JSON has `errors` and `warnings` arrays with `kind`, `package`, `file`, `line`, and `message`. `--json` is short for `--reporter json`.
+
+In a workflow, `--reporter github` prints one `::error` or `::warning` workflow command per finding, then the usual text report. GitHub and Gitea Actions both turn these into annotations on the named file and line. Paths are relative to the repository root, found by looking for `.git` above the workspace, so a workspace in a subdirectory still annotates the right file. A finding about a member's coverage points at line 1 of the root `pubspec.yaml`, where an allow entry would go. Strict mode treats warnings as a failing exit status while retaining their warning classification in JSON. It does not modify CI or write allow entries.
 
 Exit statuses are 0 for success, 1 for failed steps or check findings, 2 for usage, configuration, or environment errors, and 130 or 143 when a run is interrupted by SIGINT or SIGTERM. Default check warnings alone do not fail; strict warnings do.
 

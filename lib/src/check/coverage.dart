@@ -77,6 +77,52 @@ class CheckReport {
     buffer.writeln('${errors.length} error(s), ${warnings.length} warning(s).');
     return buffer.toString().trimRight();
   }
+
+  /// GitHub workflow commands, one per finding, which Gitea Actions also
+  /// turns into annotations. [prefix] is the workspace root's directory
+  /// inside the repository, since annotation paths are repository-relative.
+  String renderGithub({String prefix = ''}) {
+    final buffer = StringBuffer();
+    for (final (severity, findings) in [
+      ('error', errors),
+      ('warning', warnings),
+    ]) {
+      for (final finding in findings) {
+        final file = prefix.isEmpty ? finding.file : '$prefix/${finding.file}';
+        final owner = finding.package == null ? '' : '${finding.package}: ';
+        buffer.writeln(
+          '::$severity file=${_property(file)},line=${finding.line},'
+          'title=${_property('monorepo check ${finding.kind}')}'
+          '::${_data('$owner${finding.message}')}',
+        );
+      }
+    }
+    return buffer.toString();
+  }
+}
+
+String _data(String value) => value
+    .replaceAll('%', '%25')
+    .replaceAll('\r', '%0D')
+    .replaceAll('\n', '%0A');
+
+String _property(String value) =>
+    _data(value).replaceAll(':', '%3A').replaceAll(',', '%2C');
+
+/// The workspace root's path inside its git checkout, found by looking for
+/// `.git` in [root] and its parents. Empty at the top or outside git.
+String repositoryPrefix(String root) {
+  var directory = p.normalize(p.absolute(root));
+  while (true) {
+    if (FileSystemEntity.typeSync(p.join(directory, '.git')) !=
+        FileSystemEntityType.notFound) {
+      final relative = p.relative(root, from: directory);
+      return relative == '.' ? '' : relative.replaceAll('\\', '/');
+    }
+    final parent = p.dirname(directory);
+    if (parent == directory) return '';
+    directory = parent;
+  }
 }
 
 /// Examines workflow text and filesystem paths without running any shell code.

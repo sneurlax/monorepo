@@ -803,6 +803,49 @@ jobs:
     });
   });
 
+  group('github reporter', () {
+    test('prints one escaped workflow command per finding', () {
+      const report = CheckReport(
+        errors: [
+          Finding(
+            kind: 'test',
+            package: 'a',
+            file: 'pubspec.yaml',
+            line: 1,
+            message: 'No workflow fully tests packages/a/test',
+          ),
+        ],
+        warnings: [
+          Finding(
+            kind: 'unparsed',
+            file: '.github/workflows/a,b.yml',
+            line: 7,
+            message: '100% dynamic\nsecond line: here',
+          ),
+        ],
+      );
+      expect(report.renderGithub(prefix: 'sub'), '''
+::error file=sub/pubspec.yaml,line=1,title=monorepo check test::a: No workflow fully tests packages/a/test
+::warning file=sub/.github/workflows/a%2Cb.yml,line=7,title=monorepo check unparsed::100%25 dynamic%0Asecond line: here
+''');
+      expect(const CheckReport(errors: [], warnings: []).renderGithub(), '');
+    });
+
+    test('annotation paths are relative to the repository root', () {
+      final temp = Directory.systemTemp.createTempSync('monorepo-prefix-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final nested = Directory(p.join(temp.path, 'repo', 'tools', 'ws'))
+        ..createSync(recursive: true);
+      expect(repositoryPrefix(nested.path), '');
+      Directory(p.join(temp.path, 'repo', '.git')).createSync();
+      expect(repositoryPrefix(nested.path), 'tools/ws');
+      expect(repositoryPrefix(p.join(temp.path, 'repo')), '');
+      // A linked worktree has a .git file instead of a directory.
+      File(p.join(nested.path, '.git')).writeAsStringSync('gitdir: x\n');
+      expect(repositoryPrefix(nested.path), '');
+    });
+  });
+
   group('coverage and stale paths', () {
     late Directory fixture;
     late Workspace workspace;
