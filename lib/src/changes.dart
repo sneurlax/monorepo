@@ -104,6 +104,29 @@ Future<List<String>> changedFiles(
   return files;
 }
 
+/// Whether git tracks the root-relative [path] under [root]. Outside a git
+/// checkout, or when git cannot run, the answer is no. Read-only, like
+/// [changedFiles].
+Future<bool> isTracked(
+  String root,
+  String path, {
+  Duration timeout = const Duration(seconds: 30),
+}) async {
+  try {
+    final result = await Process.run(
+      'git',
+      ['ls-files', '--error-unmatch', '--', path],
+      workingDirectory: root,
+      environment: {'GIT_OPTIONAL_LOCKS': '0'},
+    ).timeout(timeout);
+    return result.exitCode == 0;
+  } on ProcessException {
+    return false;
+  } on TimeoutException {
+    return false;
+  }
+}
+
 /// Maps root-relative [files] to the member that owns each one, using the
 /// same fences as formatting: the deepest member directory wins, and a
 /// directory with its own pubspec that is not a member belongs to nobody.

@@ -1,18 +1,30 @@
 import 'dart:convert';
 import 'planner.dart';
 
-String renderStep(PlanStep step) {
+/// The step's environment and argument vector as one shell command, without
+/// its directory or accepted-status handling.
+String renderCommand(PlanStep step) {
   final argv = step.argv.map(shellQuote).join(' ');
   final env = step.env.isEmpty
       ? ''
       : 'env ${step.env.entries.map((e) => shellQuote('${e.key}=${e.value}')).join(' ')} ';
-  final command = '$env$argv';
+  return '$env$argv';
+}
+
+/// A shell test that succeeds for the step's accepted nonzero statuses, or
+/// null when only 0 is accepted.
+String? renderAcceptedStatus(PlanStep step) {
   final accepted = step.acceptedExitCodes.where((code) => code != 0).toList();
-  final status = accepted.isEmpty
+  return accepted.isEmpty
       ? null
       : accepted.length == 1
       ? '[ \$? -eq ${accepted.single} ]'
       : '{ code=\$?; ${accepted.map((code) => '[ "\$code" -eq $code ]').join(' || ')}; }';
+}
+
+String renderStep(PlanStep step) {
+  final command = renderCommand(step);
+  final status = renderAcceptedStatus(step);
   if (step.cwd == '.') {
     return status == null ? command : '($command || $status)';
   }

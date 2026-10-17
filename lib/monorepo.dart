@@ -4,6 +4,7 @@ import 'src/commands/runner.dart';
 import 'src/model.dart';
 
 export 'src/changes.dart';
+export 'src/ci.dart';
 export 'src/config.dart';
 export 'src/doctor.dart';
 export 'src/executor.dart';

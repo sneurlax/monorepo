@@ -5,6 +5,7 @@ import 'package:args/command_runner.dart';
 import 'package:path/path.dart' as p;
 import '../changes.dart';
 import '../check/coverage.dart';
+import '../ci.dart';
 import '../completion.dart';
 import '../config.dart';
 import '../doctor.dart';
@@ -15,8 +16,6 @@ import '../ownership.dart';
 import '../planner.dart';
 import '../render.dart';
 import '../workspace.dart';
-
-const toolVersion = '0.1.0';
 
 class MonorepoRunner extends CommandRunner<int> {
   MonorepoRunner()
@@ -31,6 +30,7 @@ class MonorepoRunner extends CommandRunner<int> {
     addCommand(DoctorCommand());
     addCommand(CompletionCommand());
     addCommand(CheckCommand());
+    addCommand(CiCommand());
     for (final name in ['test', 'analyze', 'format', 'exec', 'run']) {
       addCommand(OperationCommand(name));
     }
@@ -325,6 +325,119 @@ class CheckCommand extends Command<int> {
           : report.renderHuman(),
     );
     return report.hasProblems(strict: argResults!['strict'] as bool) ? 1 : 0;
+  }
+}
+
+class CiCommand extends Command<int> {
+  @override
+  String get name => 'ci';
+  @override
+  String get description =>
+      'Print workflow YAML running the planned format, analyze and test '
+      'commands. Writes no file.';
+  @override
+  String get invocation => 'monorepo ci [options] [-- <test arguments>]';
+  CiCommand() {
+    argParser
+      ..addOption(
+        'provider',
+        allowed: ['github', 'gitea'],
+        defaultsTo: 'github',
+        help:
+            'github adds SDK setup actions; gitea expects the SDKs on the '
+            'runner and prints their versions.',
+      )
+      ..addFlag('test', negatable: false, help: 'Include test steps.')
+      ..addFlag('analyze', negatable: false, help: 'Include analysis.')
+      ..addFlag(
+        'format-check',
+        negatable: false,
+        help: 'Include the format check. Without any of these, all three.',
+      )
+      ..addOption('runs-on', defaultsTo: 'ubuntu-latest', valueHelp: 'label')
+      ..addOption('job', defaultsTo: 'ci', valueHelp: 'name')
+      ..addOption(
+        'timeout',
+        valueHelp: 'minutes',
+        help:
+            'Wrap each command in timeout --signal=TERM --kill-after=30s '
+            '<minutes>m.',
+      )
+      ..addFlag(
+        'steps-only',
+        negatable: false,
+        help: 'Print only the format, analyze and test steps as a list.',
+      );
+    addFilterOptions(argParser);
+  }
+  @override
+  Future<int> run() async {
+    final options = argResults!;
+    final chosen = [
+      for (final (flag, command) in [
+        ('format-check', 'format'),
+        ('analyze', 'analyze'),
+        ('test', 'test'),
+      ])
+        if (options[flag] as bool) command,
+    ];
+    final commands = chosen.isEmpty ? ['format', 'analyze', 'test'] : chosen;
+    if (options.rest.isNotEmpty && !commands.contains('test')) {
+      usageException('Arguments after -- go to dart test; add --test');
+    }
+    final job = options['job'] as String;
+    if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_-]*$').hasMatch(job)) {
+      usageException(
+        '--job must start with a letter or _ and contain only '
+        'letters, digits, - and _',
+      );
+    }
+    final runsOn = options['runs-on'] as String;
+    if (runsOn.trim().isEmpty) usageException('--runs-on needs a label');
+    int? timeout;
+    if (options['timeout'] != null) {
+      timeout = int.tryParse(options['timeout'] as String);
+      if (timeout == null || timeout < 1) {
+        usageException('--timeout must be a positive number of minutes');
+      }
+    }
+    final (workspace, config) = await loadWorkspace();
+    final (filters, notes) = await parseFilters(options, workspace);
+    final ownership = collectOwnership(workspace, config);
+    final plans = [
+      for (final command in commands)
+        buildPlan(
+          workspace,
+          config,
+          Request(
+            command,
+            filters: filters,
+            comments: notes,
+            arguments: command == 'test' ? options.rest : const [],
+            check: command == 'format',
+          ),
+          ownership: ownership,
+        ),
+    ];
+    stdout.writeln(
+      renderWorkflow(
+        workspace,
+        plans,
+        CiOptions(
+          provider: options['provider'] as String,
+          runsOn: runsOn,
+          job: job,
+          timeout: timeout,
+          stepsOnly: options['steps-only'] as bool,
+          enforceLockfile: options['steps-only'] as bool
+              ? false
+              : File(p.join(workspace.root, 'pubspec.lock')).existsSync() &&
+                    await isTracked(workspace.root, 'pubspec.lock'),
+          invocation: options.arguments,
+        ),
+      ),
+    );
+    return 0;
   }
 }
 

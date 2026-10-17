@@ -1,3 +1,6 @@
+/// The version `--version` prints; the pubspec version, checked by a test.
+const toolVersion = '0.1.0';
+
 /// Immutable package and workspace input shared by planners and drift checks.
 class Package {
   final String name;

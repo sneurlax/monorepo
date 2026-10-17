@@ -155,6 +155,47 @@ dev_dependencies:
       }
     },
   );
+  test('ci output makes check pass and writes nothing', () async {
+    List<String> tree() =>
+        Directory(fixture.path)
+            .listSync(recursive: true)
+            .map((e) => p.relative(e.path, from: fixture.path))
+            .toList()
+          ..sort();
+    final before = tree();
+    final generated = await tool([
+      'ci',
+      '--provider',
+      'gitea',
+      '--runs-on',
+      'manymath-maintenance-linux-x64',
+      '--timeout',
+      '10',
+    ]);
+    expect(generated.exitCode, 0, reason: '${generated.stderr}');
+    expect(tree(), before);
+    final steps = await tool(['ci', '--steps-only', '--test']);
+    expect(steps.exitCode, 0, reason: '${steps.stderr}');
+    expect(steps.stdout, isNot(contains('runs-on')));
+    final workflow = File(p.join(fixture.path, '.gitea/workflows/ci.yml'));
+    workflow.parent.createSync(recursive: true);
+    try {
+      workflow.writeAsStringSync(generated.stdout as String);
+      final check = await tool(['check', '--strict']);
+      expect(check.exitCode, 0, reason: '${check.stdout}');
+      expect(check.stdout, '0 error(s), 0 warning(s).\n');
+    } finally {
+      Directory(p.join(fixture.path, '.gitea')).deleteSync(recursive: true);
+    }
+    for (final args in [
+      ['ci', '--provider', 'circle'],
+      ['ci', '--timeout', '0'],
+      ['ci', '--job', 'two words'],
+      ['ci', '--analyze', '--', '-x', 'slow'],
+    ]) {
+      expect((await tool(args)).exitCode, 2, reason: '$args');
+    }
+  });
   test(
     'check --reporter github annotates findings and keeps the report',
     () async {
