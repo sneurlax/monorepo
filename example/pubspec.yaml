@@ -1,0 +1,12 @@
+# A fixture for monorepo's own CI. `monorepo ci` printed
+# .github/workflows/ci.yml, and `monorepo check --strict` must accept it. The
+# code is standalone and the tests are placeholders, so the tool's own
+# analysis needs no pub get here.
+name: monorepo_example
+publish_to: none
+environment:
+  sdk: ^3.10.0
+workspace:
+  - packages/greeting
+  - packages/greeting/example
+  - packages/greeting_cli

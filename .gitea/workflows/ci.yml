@@ -1,0 +1,40 @@
+name: Verify monorepo
+on:
+  push:
+    branches: [main, 'maintenance/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  DASH__SUPPRESS_ANALYTICS: "true"
+  FLUTTER_SUPPRESS_ANALYTICS: "true"
+jobs:
+  verify:
+    runs-on: manymath-maintenance-linux-x64
+    timeout-minutes: 30
+    steps:
+      - name: Require the primary forge
+        env:
+          PRIMARY_SERVER: ${{ github.server_url }}
+        run: test "$PRIMARY_SERVER" = 'https://git.manymath.com'
+      - uses: actions/checkout@v4
+      - name: Provisioned SDK
+        run: |
+          dart --version
+          dart --version 2>&1 | grep -F 'Dart SDK version: 3.13.2 '
+      - run: dart pub get --enforce-lockfile
+      - run: dart format --output none --set-exit-if-changed .
+      - run: dart analyze --fatal-infos
+      - run: dart test
+      - run: dart compile exe bin/monorepo.dart -o "$RUNNER_TEMP/monorepo"
+      - name: Check this repository's workflows
+        run: dart run bin/monorepo.dart check --strict --reporter github
+      # The example workspace's workflow was printed by `monorepo ci`. It must
+      # still match the generator, and check must accept it.
+      - name: Dogfood ci and check on the example workspace
+        working-directory: example
+        run: |
+          dart run ../bin/monorepo.dart ci > "$RUNNER_TEMP/example-ci.yml"
+          diff -u .github/workflows/ci.yml "$RUNNER_TEMP/example-ci.yml"
+          dart run ../bin/monorepo.dart check --strict --reporter github

@@ -1,0 +1,5 @@
+# The example has no dev dependencies, so it keeps the analyzer defaults
+# instead of inheriting the tool's lints.
+analyzer:
+  language:
+    strict-casts: true

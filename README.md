@@ -375,6 +375,8 @@ dart analyze --fatal-infos
 dart test
 ```
 
+`.gitea/workflows/ci.yml` runs these on pushes to `main` and `maintenance/**` and on pull requests, on the `manymath-maintenance-linux-x64` runner after the primary-forge guard and a Dart 3.13.2 check. It also compiles `bin/monorepo.dart`, runs `monorepo check --strict` on this repository (which has no workspace members, so this proves its own workflow parses and its paths exist), and dogfoods the generator on `example/`: a small workspace whose `.github/workflows/ci.yml` was printed by `monorepo ci`, which must still match the generator and pass `monorepo check --strict`. After changing `ci` output, regenerate it from `example/` with `dart run ../bin/monorepo.dart ci > .github/workflows/ci.yml`. No runner is registered for this repository yet, so the workflow has not run; I run its commands by hand.
+
 The `e2e` tag covers real Dart/Flutter runners, workspace discovery and a build-hook fixture. Tests resolve temporary fixture dependencies with an offline, time-limited pub invocation, so an SDK cache containing the declared Flutter/test/hooks dependencies is required. Run `dart test --exclude-tags=e2e` for parser/planner/unit tests only. POSIX shell replay tests also require `sh`, Python 3, and `chmod`; those tests skip on Windows. Native Windows execution is implemented but not validated on a Windows host in this change.
 
 Licensed under the MIT License; Copyright (c) 2026 ManyMath LLC.
