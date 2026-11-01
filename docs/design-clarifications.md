@@ -31,3 +31,35 @@ implementation notes, not changes to the original prompt.
    Preserve the repository's existing no-tracked-lock policy rather than adding
    an entirely new lockfile that cannot satisfy the pure-deletion Git diff rule.
    This exception was agreed with the migration agent before B3.
+
+## v0.2 decisions
+
+These follow the same contract: plans are built before execution, nothing
+writes repository state except `format`, and output is deterministic.
+
+5. `check` resolves workflow context the way the runner does before the
+   shell starts: static matrix combinations, `env:` literals, and the CI
+   workspace and temp locations. Anything it cannot resolve stays a warning
+   and never coverage. Shell loops that may run zero times never establish
+   coverage, even when their words look like member paths. Collapsing
+   warnings per job changes how many findings print, not which sites were
+   found; `--verbose` and the JSON `sites` array keep every site.
+6. `--since` uses the fences that formatting uses. A file in a nested
+   non-member package such as `cargokit/build_tool` selects nobody, even
+   though its owner's build may use it. Root `pubspec.yaml`, `pubspec.lock`,
+   and `analysis_options.yaml` select everything. Git runs `rev-parse`,
+   `diff`, and `ls-files` only, with `GIT_OPTIONAL_LOCKS=0`.
+7. Parallel `exec` waits for the steps of the members a step depends on,
+   because exec usually generates code or artifacts. Parallel `test` does
+   not, because each runner compiles its dependencies from source. The
+   dependency edges are part of the plan (`dependsOn` in JSON) so execution
+   still consumes exactly the printed plan. The sequential shell form is
+   already dependency ordered.
+8. `doctor` and `graph` are read-only inspections like `list` and `check`,
+   not plan-based operations. Doctor runs only version probes and the
+   metadata-only workspace listing.
+9. Version, publish, and changelog generation are out of scope while
+   nothing is published. If packages start publishing, a `version` plan that
+   prints the pubspec and changelog edits before applying them would fit the
+   contract, and would be the second explicitly writing command after
+   `format`.

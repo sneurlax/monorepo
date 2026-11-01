@@ -6,21 +6,32 @@ I use `monorepo` to run the right command in each Dart pub workspace member and 
 
 ## Install
 
-Requires Dart 3.10 or later. Flutter must also be on PATH to run Flutter package tests. Install from a local checkout:
+Requires Dart 3.10 or later. Flutter must also be on PATH to run Flutter package tests. The package is not published to pub.dev. Install it from the ManyMath Gitea repository, pinned to a commit you have reviewed:
 
 ```sh
-export DASH__SUPPRESS_ANALYTICS=true
-export FLUTTER_SUPPRESS_ANALYTICS=true
-timeout 300 dart pub global activate --source path ~/src/ManyMath/monorepo
+dart pub global activate --source git ssh://git@git.manymath.com:2222/sneurlax/monorepo.git --git-ref <commit>
 export PATH="$HOME/.pub-cache/bin:$PATH"
 monorepo --version
 ```
 
-Windows users should add `%LOCALAPPDATA%\Pub\Cache\bin` to PATH as appropriate for their Dart installation. Git Bash is required only for configured shell scripts (`run`); missing bash produces exit 2 and prints the attempted command. Dart and Flutter commands launch through the Windows shell so `.bat` launchers work.
+Git activation resolves and precompiles once, so later launches start quietly. To update, activate again with a newer commit. Use `git ls-remote ssh://git@git.manymath.com:2222/sneurlax/monorepo.git main` to see the current tip.
 
-The package is not published and this repository has no configured remote. A later installation from Git should pin a reviewed commit. No activation belongs in a consumer's `pubspec.yaml`.
+For a checkout you are working on, there are two options:
 
-Run commands from a workspace root or one of its members. Run `dart pub get` yourself before tests, analysis, or formatting. Discovery is metadata-only and has a 30-second subprocess timeout.
+```sh
+# A native executable, rebuilt when you choose to. Defaults to ~/.local/bin.
+tool/install.sh
+tool/install.sh ~/bin
+
+# A path activation that always runs the checkout's current source.
+dart pub global activate --source path ~/src/ManyMath/monorepo
+```
+
+A path activation re-checks the checkout's dependencies on every launch and prints `Resolving dependencies...` and similar lines before each command's output. That is pub's behavior for path activations, so prefer git activation or the compiled executable for everyday use. `tool/install.sh` runs `dart pub get` (offline when the cache allows) and `dart compile exe bin/monorepo.dart` in the tool's own checkout, then reports when another `monorepo` comes first on PATH. On Windows, run `dart compile exe bin/monorepo.dart -o monorepo.exe` and put the result on PATH.
+
+Windows users of an activation should add `%LOCALAPPDATA%\Pub\Cache\bin` to PATH as appropriate for their Dart installation. Git Bash is required only for configured shell scripts (`run`); missing bash produces exit 2 and prints the attempted command. Dart and Flutter commands launch through the Windows shell so `.bat` launchers work.
+
+No activation belongs in a consumer's `pubspec.yaml`. Run commands from a workspace root or one of its members. Run `dart pub get` yourself before tests, analysis, or formatting. Discovery is metadata-only and has a 30-second subprocess timeout.
 
 ## List and select members
 
@@ -369,7 +380,7 @@ Use `monorepo plan test > test-all.sh` for a self-contained script that runs eve
 
 ```sh
 export DASH__SUPPRESS_ANALYTICS=true FLUTTER_SUPPRESS_ANALYTICS=true
-timeout 300 dart pub get --offline
+dart pub get --offline
 dart format --output none --set-exit-if-changed .
 dart analyze --fatal-infos
 dart test

@@ -107,7 +107,7 @@ dev_dependencies:
   });
   tearDownAll(() => fixture.deleteSync(recursive: true));
   test('version, help and usage error', () async {
-    expect((await tool(['--version'])).stdout, '0.1.0\n');
+    expect((await tool(['--version'])).stdout, '0.2.0\n');
     expect((await tool(['help', 'test'])).stdout, contains('--concurrency'));
     expect((await tool(['unknown'])).exitCode, 2);
   });

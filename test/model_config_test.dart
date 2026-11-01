@@ -8,6 +8,12 @@ import 'package:test/test.dart';
 import 'package:yaml/yaml.dart' as yaml;
 
 void main() {
+  test('the reported version matches the pubspec', () {
+    final pubspec =
+        yaml.loadYaml(File('pubspec.yaml').readAsStringSync()) as Map;
+    expect(toolVersion, pubspec['version']);
+  });
+
   late Directory temp;
   setUp(() => temp = Directory.systemTemp.createTempSync('monorepo-model-'));
   tearDown(() => temp.deleteSync(recursive: true));
